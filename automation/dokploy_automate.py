@@ -1,0 +1,776 @@
+import requests
+import time
+import argparse
+import sys
+import subprocess
+import json
+import os
+
+print("DEBUG: Script started...")
+
+
+def request_with_retry(
+    method, url, max_retries=3, backoff_factor=2, timeout=30, **kwargs
+):
+    """Makes an HTTP request with retry logic for transient failures."""
+    for attempt in range(max_retries):
+        try:
+            print(f"DEBUG: [REQ] {method} {url} (Attempt {attempt + 1})")
+            start_ptr = time.time()
+            response = requests.request(method, url, timeout=timeout, **kwargs)
+            duration = time.time() - start_ptr
+            print(f"DEBUG: [RES] {response.status_code} ({duration:.2f}s)")
+
+            if response.status_code < 500:
+                return response
+
+            print(f"DEBUG: Server error {response.status_code}, retrying...")
+        except requests.exceptions.RequestException as e:
+            print(f"DEBUG: Request failed: {e}")
+            if attempt == max_retries - 1:
+                raise
+
+        sleep_time = backoff_factor**attempt
+        print(f"DEBUG: Sleeping {sleep_time}s before retry...")
+        time.sleep(sleep_time)
+
+    return requests.request(method, url, timeout=timeout, **kwargs)
+
+
+def wait_for_dokploy(url, timeout=300):
+    """Wait for Dokploy service to be accessible."""
+    start_time = time.time()
+    print(f"Waiting for Dokploy at {url}...")
+    while time.time() - start_time < timeout:
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                print("Dokploy is up and running!")
+                return True
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(5)
+    print("Timeout waiting for Dokploy")
+    return False
+
+
+def register_admin(url, email, password, name="Admin", last_name="User"):
+    """Register admin user via the Better Auth sign-up endpoint."""
+    signup_url = f"{url}/api/auth/sign-up/email"
+    headers = {"Content-Type": "application/json", "Accept": "*/*"}
+    payload = {
+        "email": email,
+        "password": password,
+        "name": name,
+        "lastName": last_name,
+    }
+
+    print(f"Checking/Registering admin with email: {email}")
+    try:
+        response = request_with_retry("POST", signup_url, json=payload, headers=headers)
+        if response.status_code in [200, 201]:
+            print("SUCCESS! Admin account created successfully!")
+            return True
+        elif response.status_code == 422 and "USER_ALREADY_EXISTS" in response.text:
+            print("Admin account already exists, proceeding to login.")
+            return True
+        else:
+            print(f"Registration status: {response.status_code}")
+            print(f"DEBUG: Response Body: {response.text}")
+            return False
+    except requests.exceptions.RequestException as e:
+        print(f"Error during registration: {e}")
+        return False
+
+
+def login(url, email, password):
+    """Log in to Dokploy and return the session token cookie."""
+    login_url = f"{url}/api/auth/sign-in/email"
+    payload = {"email": email, "password": password}
+
+    print(f"Logging in as {email}...")
+    try:
+        response = request_with_retry("POST", login_url, json=payload)
+        if response.status_code == 200:
+            print("Login successful!")
+            return response.cookies
+        else:
+            print(f"Login failed: {response.status_code}")
+            print(f"DEBUG: Response Body: {response.text}")
+            return None
+    except Exception as e:
+        print(f"Error during login: {e}")
+        return None
+
+
+def setup_ssh_and_server(
+    url, cookies, ip_address, organization_id, username="adminuser"
+):
+    """Generate SSH key, add to authorized_keys, and register server."""
+    # 1. Generate SSH Key in Dokploy
+    trpc_url_gen = f"{url}/api/trpc/sshKey.generate?batch=1"
+    payload_gen = {"0": {"json": {}}}
+
+    import time
+
+    timestamp = int(time.time())
+    key_name = f"Key-{timestamp}"
+    server_name = f"Server-{timestamp}"
+
+    print(f"Generating SSH key ({key_name}) in Dokploy...")
+    try:
+        resp_gen = request_with_retry(
+            "POST", trpc_url_gen, json=payload_gen, cookies=cookies
+        )
+        keys = resp_gen.json()[0]["result"]["data"]["json"]
+        private_key = keys["privateKey"]
+        public_key = keys["publicKey"]
+
+        # 2. Add public key to authorized_keys on VM (both adminuser and root)
+        # Purge Azure's restricted root authorized_keys and enable root login
+        print(f"Authorizing public key on VM ({ip_address}) for adminuser and root...")
+        ssh_cmd = [
+            "ssh",
+            "-i",
+            "~/.ssh/id_rsa",
+            "-o",
+            "StrictHostKeyChecking=no",
+            f"{username}@{ip_address}",
+            f"echo '{public_key}' | tee -a /home/{username}/.ssh/authorized_keys > /dev/null && "
+            f"sudo sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && "
+            f"sudo sed -i 's/PermitRootLogin no/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config && "
+            f"sudo systemctl reload ssh && "
+            f"sudo mkdir -p /root/.ssh && "
+            f"echo '{public_key}' | sudo tee /root/.ssh/authorized_keys > /dev/null",
+        ]
+        subprocess.run(ssh_cmd, check=True)
+
+        # 3. Create SSH Key record in Dokploy
+        trpc_url_key = f"{url}/api/trpc/sshKey.create?batch=1"
+        payload_key = {
+            "0": {
+                "json": {
+                    "name": key_name,
+                    "description": "Automated key for local deployment",
+                    "privateKey": private_key,
+                    "publicKey": public_key,
+                    "organizationId": organization_id,
+                }
+            }
+        }
+        print(f"Registering SSH key record ({key_name}) in Dokploy...")
+        request_with_retry("POST", trpc_url_key, json=payload_key, cookies=cookies)
+
+        # 4. Fetch the created SSH key ID by name
+        trpc_url_all_keys = f"{url}/api/trpc/sshKey.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
+        resp_all = request_with_retry("GET", trpc_url_all_keys, cookies=cookies)
+        keys_list = resp_all.json()[0]["result"]["data"]["json"]
+        ssh_key_id = next(
+            (k["sshKeyId"] for k in keys_list if k["name"] == key_name), None
+        )
+
+        if not ssh_key_id:
+            print(f"Error: Could not find created SSH key with name {key_name}")
+            return None
+
+        print(f"Found SSH Key ID: {ssh_key_id}")
+
+        # 4. Create Server record in Dokploy (using ROOT)
+        trpc_url_srv = f"{url}/api/trpc/server.create?batch=1"
+        payload_srv = {
+            "0": {
+                "json": {
+                    "name": server_name,
+                    "description": "Primary deployment server",
+                    "ipAddress": ip_address,
+                    "port": 22,
+                    "username": "root",
+                    "sshKeyId": ssh_key_id,
+                    "serverType": "deploy",
+                    "organizationId": organization_id,
+                }
+            }
+        }
+        print(f"Initializing server ({server_name}) in Dokploy...")
+        resp_srv = request_with_retry(
+            "POST", trpc_url_srv, json=payload_srv, cookies=cookies
+        )
+        data_srv = resp_srv.json()
+
+        if isinstance(data_srv, list) and len(data_srv) > 0:
+            res_srv = data_srv[0].get("result", {})
+            if "error" in res_srv:
+                print(f"Server creation error: {res_srv['error']}")
+                return None
+            server_id = res_srv.get("data", {}).get("json", {}).get("serverId")
+        else:
+            print(f"DEBUG: Unexpected server creation response: {data_srv}")
+            return None
+
+        # 5. Start server setup
+        print("Triggering server setup...")
+        trpc_url_setup = f"{url}/api/trpc/server.setup?batch=1"
+        request_with_retry(
+            "POST",
+            trpc_url_setup,
+            json={"0": {"json": {"serverId": server_id}}},
+            cookies=cookies,
+            timeout=60,  # Increased timeout for initial setup trigger
+        )
+
+        return server_id
+    except Exception as e:
+        print(f"Error during SSH/Server setup: {e}")
+        return None
+
+
+def delete_existing_apps(url, cookies, env_id):
+    """Delete all single-container applications in the environment."""
+    trpc_url_all = f"{url}/api/trpc/application.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{env_id}%22%7D%7D%7D"
+    try:
+        resp = request_with_retry("GET", trpc_url_all, cookies=cookies)
+        apps = resp.json()[0]["result"]["data"]["json"]
+        for app in apps:
+            print(f"Deleting application: {app['name']}...")
+            trpc_url_del = f"{url}/api/trpc/application.delete?batch=1"
+            request_with_retry(
+                "POST",
+                trpc_url_del,
+                json={"0": {"json": {"applicationId": app["applicationId"]}}},
+                cookies=cookies,
+            )
+    except Exception as e:
+        print(f"DEBUG: Warning - could not delete apps: {e}")
+        pass
+
+
+def delete_existing_compose(url, cookies, env_id):
+    """Delete all compose applications in the environment."""
+    trpc_url_all = f"{url}/api/trpc/compose.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{env_id}%22%7D%7D%7D"
+    try:
+        resp = requests.get(trpc_url_all, cookies=cookies, timeout=30)
+        apps = resp.json()[0]["result"]["data"]["json"]
+        for app in apps:
+            print(f"Deleting compose app: {app['name']}...")
+            trpc_url_del = f"{url}/api/trpc/compose.delete?batch=1"
+            requests.post(
+                trpc_url_del,
+                json={
+                    "0": {
+                        "json": {"composeId": app["composeId"], "deleteVolumes": True}
+                    }
+                },
+                cookies=cookies,
+                timeout=30,
+            )
+    except Exception:
+        pass
+
+
+def get_all_project_ids(url, cookies):
+    """Find all existing projects and return their IDs and Env IDs."""
+    trpc_url = f"{url}/api/trpc/project.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%2C%22meta%22%3A%7B%22values%22%3A%5B%22undefined%22%5D%7D%7D%7D"
+    matches = []
+    try:
+        response = requests.get(trpc_url, cookies=cookies, timeout=30)
+        data = response.json()
+        projects = data[0]["result"]["data"]["json"]
+        for p in projects:
+            projectId = p["projectId"]
+            env_id = get_environment_id(url, cookies, projectId)
+            matches.append((projectId, env_id, p["name"]))
+    except Exception as e:
+        print(f"DEBUG: Error listing all projects: {e}")
+    return matches
+
+
+def get_environment_id(url, cookies, project_id):
+    """Get the production environment ID for the project."""
+    trpc_url = f"{url}/api/trpc/project.one?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22projectId%22%3A%22{project_id}%22%7D%7D%7D"
+    try:
+        response = requests.get(trpc_url, cookies=cookies, timeout=30)
+        data = response.json()
+        environments = data[0]["result"]["data"]["json"]["environments"]
+        for env in environments:
+            if env["name"] == "production":
+                return env["environmentId"]
+    except Exception:
+        pass
+    return None
+
+
+def delete_project(url, cookies, project_id):
+    """Delete a project and all its resources."""
+    print(f"Deleting project {project_id}...")
+    trpc_url_del = f"{url}/api/trpc/project.delete?batch=1"
+    payload = {"0": {"json": {"projectId": project_id}}}
+    try:
+        requests.post(trpc_url_del, json=payload, cookies=cookies, timeout=30)
+        print("Project deleted.")
+        return True
+    except Exception as e:
+        print(f"Error deleting project: {e}")
+        return False
+
+
+def force_cleanup_ports(ip_address, username, key_path, ports):
+    """Forcefully remove docker containers binding specific ports via SSH."""
+    print(f"Force-cleaning ports {ports} on {ip_address}...")
+
+    # Construct command to find and kill containers mapping these ports
+    # We loop through each port to be safe
+    commands = []
+
+    # Check for docker ps filtering for published ports
+    for port in ports:
+        # Docker formatting: 0.0.0.0:9000->... or :::9000->...
+        # We look for containers publishing this port
+        cmd = f"docker ps -a --format '{{{{.ID}}}} {{{{.Ports}}}}' | grep ':{port}->' | awk '{{print $1}}' | xargs -r docker rm -f"
+        commands.append(cmd)
+
+    full_command = " && ".join(commands)
+
+    ssh_cmd = [
+        "ssh",
+        "-i",
+        key_path,
+        "-o",
+        "StrictHostKeyChecking=no",
+        f"{username}@{ip_address}",
+        full_command,
+    ]
+
+    try:
+        subprocess.run(
+            ssh_cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+        print("Port cleanup commands executed successfully.")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: Port cleanup failed (may be harmless if empty): {e}")
+        return False
+
+
+def create_project(url, cookies, organization_id, name="Agentic Demos"):
+    """Create a new project in Dokploy."""
+    trpc_url = f"{url}/api/trpc/project.create?batch=1"
+    payload = {
+        "0": {
+            "json": {
+                "name": name,
+                "description": "Automated Project",
+                "projectId": "",
+                "organizationId": organization_id,
+            }
+        }
+    }
+    print(f"Creating project: {name}...")
+    try:
+        response = requests.post(trpc_url, json=payload, cookies=cookies, timeout=30)
+        data = response.json()
+        project_data = data[0]["result"]["data"]["json"]["project"]
+        env_data = data[0]["result"]["data"]["json"]["environment"]
+        return project_data["projectId"], env_data["environmentId"]
+    except Exception:
+        return None, None
+
+
+def create_compose(url, cookies, project_id, environment_id, name, server_id):
+    """Create a Compose application."""
+    trpc_url = f"{url}/api/trpc/compose.create?batch=1"
+    payload = {
+        "0": {
+            "json": {
+                "name": name,
+                "description": f"Compose deployment of {name}",
+                "environmentId": environment_id,
+                "serverId": server_id,
+                "composeType": "docker-compose",
+                "appName": name.lower().replace(" ", "-"),
+            }
+        }
+    }
+    print(f"Creating compose application: {name}...")
+    try:
+        resp = request_with_retry("POST", trpc_url, json=payload, cookies=cookies)
+        data = resp.json()
+        return data[0]["result"]["data"]["json"]["composeId"]
+    except Exception as e:
+        print(f"Error creating compose: {e}")
+        return None
+
+
+def update_compose_git(
+    url, cookies, compose_id, github_url, ssh_key_id=None, branch="main"
+):
+    """Connect GitHub repo to Compose app."""
+    trpc_url = f"{url}/api/trpc/compose.update?batch=1"
+
+    json_payload = {
+        "customGitBranch": branch,
+        "customGitUrl": github_url,
+        "customGitSSHKeyId": ssh_key_id,
+        "composeId": compose_id,
+        "sourceType": "git",
+        "composePath": "./docker-compose.yml",
+        "composeStatus": "idle",
+        "watchPaths": [],
+        "enableSubmodules": False,
+        "randomize": True,  # Ensure no port conflicts
+    }
+
+    meta_payload = {"values": {}}
+    if ssh_key_id is None:
+        meta_payload["values"]["customGitSSHKeyId"] = ["undefined"]
+
+    payload = {
+        "0": {
+            "json": json_payload,
+            "meta": meta_payload,
+        }
+    }
+    print(f"Connecting GitHub (sourceType: git): {github_url}...")
+    try:
+        request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
+    except Exception as e:
+        print(f"Error updating compose git: {e}")
+
+
+def create_domain(url, cookies, compose_id, host, port, service_name):
+    """Create a domain for a Compose service."""
+    trpc_url = f"{url}/api/trpc/domain.create?batch=1"
+    payload = {
+        "0": {
+            "json": {
+                "host": host,
+                "path": "/",
+                "port": port,
+                "https": True,
+                "composeId": compose_id,
+                "serviceName": service_name,
+                "certificateType": "letsencrypt",
+                "domainType": "compose",
+            }
+        }
+    }
+    print(f"Setting up domain: {host} (service: {service_name}, port: {port})...")
+    try:
+        request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
+    except Exception as e:
+        print(f"Error creating domain: {e}")
+
+
+def update_compose_env(url, cookies, compose_id, env_content):
+    """Update environment variables for a Compose application."""
+    trpc_url = f"{url}/api/trpc/compose.update?batch=1"
+
+    # In Dokploy, env vars are often sent as a single string field 'envVars'
+    # in the compose update payload.
+    payload = {"0": {"json": {"composeId": compose_id, "envVars": env_content}}}
+    print(f"Injecting environment variables for compose {compose_id}...")
+    try:
+        request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
+    except Exception as e:
+        print(f"Error updating environment variables: {e}")
+
+
+def detect_env_file(app_name):
+    """Look for .env files matching the app name slug or keywords."""
+    # 1. Try exact slugs
+    slugs = [
+        app_name.lower().replace(" ", "-"),
+        app_name.lower().replace(" ", "_"),
+        app_name.lower().replace("-", "_"),
+        app_name.lower(),
+    ]
+
+    search_dirs = [".", "automation"]
+
+    for directory in search_dirs:
+        for slug in slugs:
+            # Check for .env_<slug>
+            path = os.path.join(directory, f".env_{slug}")
+            if os.path.exists(path):
+                return path
+
+    # 2. Try keyword matching if no exact slug matches
+    # For "CP Agentic MCP Playground", keywords might be ["agentic", "mcp"]
+    keywords = [w.lower() for w in app_name.split() if len(w) > 3]
+    for directory in search_dirs:
+        try:
+            files = os.listdir(directory)
+            for f in files:
+                if f.startswith(".env_"):
+                    # Check if any keyword is in the filename
+                    for kw in keywords:
+                        if kw in f.lower():
+                            return os.path.join(directory, f)
+        except Exception:
+            continue
+
+    return None
+
+
+def deploy_compose(url, cookies, compose_id):
+    """Trigger deployment for Compose app."""
+    trpc_url = f"{url}/api/trpc/compose.deploy?batch=1"
+    payload = {"0": {"json": {"composeId": compose_id, "title": "Automated Setup"}}}
+    print(f"Triggering deployment for compose {compose_id}...")
+    try:
+        request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=60)
+    except Exception as e:
+        print(f"Error deploying compose: {e}")
+
+
+def wait_for_server_ready(url, cookies, server_id, timeout=300):
+    """Wait for server status to become active."""
+    print(f"Waiting for server {server_id} to be active...")
+    start_time = time.time()
+    trpc_url = f"{url}/api/trpc/server.one?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22serverId%22%3A%22{server_id}%22%7D%7D%7D"
+    while time.time() - start_time < timeout:
+        try:
+            resp = requests.get(trpc_url, cookies=cookies, timeout=10).json()
+            status = resp[0]["result"]["data"]["json"]["serverStatus"]
+            if status == "active":
+                print("Server is active!")
+                return True
+            print(f"Server status: {status} (waiting...)")
+        except Exception as e:
+            print(f"Error checking server status: {e}")
+        time.sleep(10)
+    return False
+
+
+def delete_existing_compose(url, cookies, environment_id):
+    """Delete all existing compose apps in an environment."""
+    trpc_url_one = f"{url}/api/trpc/project.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
+    try:
+        data = request_with_retry("GET", trpc_url_one, cookies=cookies).json()
+        projects = data[0]["result"]["data"]["json"]
+        for project in projects:
+            for env in project.get("environments", []):
+                if env["environmentId"] == environment_id:
+                    for comp in env.get("composes", []):
+                        print(f"Deleting existing compose: {comp['name']}...")
+                        trpc_del = f"{url}/api/trpc/compose.delete?batch=1"
+                        request_with_retry(
+                            "POST",
+                            trpc_del,
+                            json={"0": {"json": {"composeId": comp["composeId"]}}},
+                            cookies=cookies,
+                        )
+    except Exception as e:
+        print(f"Error deleting compose apps: {e}")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Automate Dokploy setup with Compose and Domains"
+    )
+    parser.add_argument("--url", required=True, help="Dokploy URL")
+    parser.add_argument("--email", required=True, help="Admin email")
+    parser.add_argument("--password", required=True, help="Admin password")
+    parser.add_argument("--ip", help="VM Public IP (default: derived from URL)")
+    parser.add_argument(
+        "--config", default="dokploy_config.json", help="Path to apps config JSON"
+    )
+    parser.add_argument(
+        "--ssh-private",
+        default="~/.ssh/id_rsa",
+        help="Path to private SSH key (default: ~/.ssh/id_rsa)",
+    )
+    parser.add_argument(
+        "--ssh-public",
+        default="~/.ssh/id_rsa.pub",
+        help="Path to public SSH key (default: ~/.ssh/id_rsa.pub)",
+    )
+    parser.add_argument(
+        "--project",
+        default="Agentic Demos",
+        help="Project name (default: Agentic Demos)",
+    )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Delete existing project before starting (Fresh Rebuild)",
+    )
+
+    args = parser.parse_args()
+    url = args.url.rstrip("/")
+    ip_address = args.ip or url.split("//")[-1].split(":")[0]
+
+    # Expand user paths
+    import os
+
+    ssh_private_path = os.path.expanduser(args.ssh_private)
+    ssh_public_path = os.path.expanduser(args.ssh_public)
+
+    if not os.path.exists(ssh_private_path) or not os.path.exists(ssh_public_path):
+        print(f"Error: SSH keys not found at {ssh_private_path} or {ssh_public_path}")
+        sys.exit(1)
+
+    # Load Config
+    try:
+        with open(args.config, "r") as f:
+            app_configs = json.load(f)
+    except Exception as e:
+        print(f"Error loading config file {args.config}: {e}")
+        sys.exit(1)
+
+    if wait_for_dokploy(url):
+        register_admin(url, args.email, args.password)
+        cookies = login(url, args.email, args.password)
+        if not cookies:
+            sys.exit(1)
+
+        # Organization
+        trpc_url_org_all = f"{url}/api/trpc/organization.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
+        org_data = requests.get(trpc_url_org_all, cookies=cookies).json()
+        try:
+            org_id = org_data[0]["result"]["data"]["json"][0]["id"]
+            print(f"Using Organization ID: {org_id}")
+        except (IndexError, KeyError, TypeError):
+            print(f"Error fetching Organization ID. Response: {org_data}")
+            sys.exit(1)
+
+        # Server Management
+        trpc_url_srv_all = f"{url}/api/trpc/server.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
+        srv_data = requests.get(trpc_url_srv_all, cookies=cookies).json()
+        servers = srv_data[0].get("result", {}).get("data", {}).get("json", [])
+
+        server_id = None
+        needs_setup = False
+        if servers:
+            existing_srv = servers[0]
+            # Verify if the existing server is actually setup with root (to avoid permission errors)
+            if existing_srv.get("username") == "root" and existing_srv.get("sshKeyId"):
+                server_id = existing_srv["serverId"]
+                print(
+                    f"Using existing root server: {existing_srv['name']} ({server_id})"
+                )
+            else:
+                print(
+                    f"Existing server {existing_srv['name']} is not root or has no key. Forcing new setup..."
+                )
+                needs_setup = True
+                server_id = setup_ssh_and_server(url, cookies, ip_address, org_id)
+        else:
+            needs_setup = True
+            server_id = setup_ssh_and_server(url, cookies, ip_address, org_id)
+
+        if not server_id:
+            print("Critical: No server available or server setup failed.")
+            sys.exit(1)
+
+        if needs_setup:
+            wait_for_server_ready(url, cookies, server_id)
+
+        print(f"Final Server ID for deployment: {server_id}")
+
+        # Git SSH Key Registration
+        git_ssh_key_id = None
+        try:
+            with open(ssh_private_path, "r") as f:
+                user_private_key = f.read()
+            with open(ssh_public_path, "r") as f:
+                user_public_key = f.read()
+
+            print("Registering User SSH Key in Dokploy for Git...")
+            trpc_url_key = f"{url}/api/trpc/sshKey.create?batch=1"
+            payload_git_key = {
+                "0": {
+                    "json": {
+                        "name": "UserGitHubKey",
+                        "description": "User's local SSH key for Git",
+                        "privateKey": user_private_key,
+                        "publicKey": user_public_key,
+                        "organizationId": org_id,
+                    }
+                }
+            }
+            requests.post(
+                trpc_url_key, json=payload_git_key, cookies=cookies, timeout=30
+            )
+
+            # Fetch the ID
+            trpc_url_all_keys = f"{url}/api/trpc/sshKey.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
+            resp_all = requests.get(trpc_url_all_keys, cookies=cookies, timeout=30)
+            keys_list = resp_all.json()[0]["result"]["data"]["json"]
+            git_ssh_key_id = next(
+                (k["sshKeyId"] for k in keys_list if k["name"] == "UserGitHubKey"), None
+            )
+            print(f"Git SSH Key ID: {git_ssh_key_id}")
+        except Exception as e:
+            print(f"Warning: Could not register user SSH key for Git: {e}")
+
+        all_projects = get_all_project_ids(url, cookies)
+
+        project_id = None
+        env_id = None
+
+        if args.clean and all_projects:
+            print(
+                f"Clean mode: Found {len(all_projects)} total projects. Deleting ALL to ensure fresh state..."
+            )
+            for pid, eid, pname in all_projects:
+                print(f"Deleting project: {pname} ({pid})...")
+                delete_project(url, cookies, pid)
+
+            # Additional aggressive cleanup via SSH
+            print("Purging all non-dokploy containers via SSH...")
+            cleanup_cmd = "sudo docker ps -a -q --filter name=lakera-demo | xargs -r sudo docker rm -f"
+            ssh_cmd = f'ssh -o StrictHostKeyChecking=no -i {ssh_private_path} adminuser@{ip_address} "{cleanup_cmd}"'
+            subprocess.run(ssh_cmd, shell=True)
+
+            time.sleep(5)
+            all_projects = []
+
+        # Find or create our target project
+        existing_target = [p for p in all_projects if p[2] == args.project]
+        if existing_target:
+            project_id, env_id, _ = existing_target[0]
+            print(f"Using existing project: {args.project} ({project_id})")
+        else:
+            project_id, env_id = create_project(url, cookies, org_id, name=args.project)
+
+        print("Cleaning up existing deployments...")
+        delete_existing_apps(url, cookies, env_id)
+        delete_existing_compose(url, cookies, env_id)
+
+        for cfg in app_configs:
+            cid = create_compose(
+                url, cookies, project_id, env_id, cfg["name"], server_id
+            )
+            if cid:
+                repo_url = cfg["repo"]
+                ssh_key_to_use = git_ssh_key_id
+
+                if repo_url.startswith("https://"):
+                    print(
+                        f"Detected HTTPS URL for {cfg['name']}, skipping SSH key attachment."
+                    )
+                    ssh_key_to_use = None
+
+                update_compose_git(url, cookies, cid, repo_url, ssh_key_to_use)
+
+                # Try to detect and inject .env file
+                env_file = detect_env_file(cfg["name"])
+                if env_file:
+                    print(f"Found environment file for {cfg['name']}: {env_file}")
+                    try:
+                        with open(env_file, "r") as f:
+                            env_content = f.read()
+                        update_compose_env(url, cookies, cid, env_content)
+                    except Exception as e:
+                        print(
+                            f"Warning: Could not read/inject env file {env_file}: {e}"
+                        )
+                else:
+                    print(f"No environment file found for {cfg['name']}.")
+
+                create_domain(
+                    url, cookies, cid, cfg["domain"], cfg["port"], cfg["service"]
+                )
+                deploy_compose(url, cookies, cid)
+
+        print("\n" + "=" * 60 + "\nDOKPLOY COMPOSE AUTOMATION COMPLETE!\n" + "=" * 60)

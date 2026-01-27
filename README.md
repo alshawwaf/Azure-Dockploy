@@ -1,71 +1,75 @@
-# Azure-Dockploy
+# Azure-Dockploy 🚀
 
-This project automates the deployment of an Ubuntu VM on Azure using Terraform, installs Dokploy, and prepares the environment for hosting multiple GitHub applications.
+This project provides a **one-click, hardened automation** to deploy a production-ready Dokploy environment on Azure. It handles everything from infrastructure provisioning to application deployment, secret injection, and security configuration.
 
-## 🚀 Overview
+## ✨ Features
 
-- **Cloud Provider**: Microsoft Azure
-- **Infrastructure as Code**: Terraform
-- **Hosting Platform**: [Dokploy](https://dokploy.com/)
-- **Target Applications**:
-  - [Lakera-Demo](https://github.com/alshawwaf/Lakera-Demo)
-  - [se-training-portal](https://github.com/alshawwaf/se-training-portal)
-  - [cp-agentic-mcp-playground](https://github.com/alshawwaf/cp-agentic-mcp-playground)
+- **One-Click Rebuild**: Infrastructure and applications can be fully destroyed and rebuilt in minutes via Terraform and Python.
+- **Hardened Automation**: `dokploy_automate.py` includes robust retry logic, exponential backoff, and extensive debug logging.
+- **Secret Management**: Automatic detection and injection of `.env` files into Dokploy containers.
+- **Persistent Storage**: Configured with persistent Azure managed disks for Dokploy and Docker data.
+- **Dynamic Routing**: Automated Traefik configuration and domain setup (including direct port exposure for immediate access).
 
 ## 🏗️ Infrastructure
 
-The infrastructure includes:
+- **Cloud Provider**: Microsoft Azure
+- **Compute**: Ubuntu 22.04 LTS (Standard_B2s)
+- **Networking**: NSG allowed ports: 22 (SSH), 80 (HTTP), 443 (HTTPS), 3000 (Dokploy), **9000 (App Port)**.
+- **Storage**: Persistent StandardSSD_LRS Managed Disk.
 
-- **Resource Group**: `dokploy-rg`
-- **Virtual Network**: `dokploy-vnet` (10.0.0.0/16)
-- **Subnet**: `dokploy-subnet` (10.0.1.0/24)
-- **Public IP**: `dokploy-pip`
-- **Network Security Group**: `dokploy-nsg`
-  - Allowed Ports: 22 (SSH), 80 (HTTP), 443 (HTTPS), 3000 (Dokploy Web UI)
-- **Virtual Machine**: `dokploy-vm` (Ubuntu 22.04 LTS, Standard_B2s)
-
-## 🛠️ Setup & Deployment
+## 🛠️ Getting Started
 
 ### Prerequisites
 
 - Terraform
-- Azure Service Principal (Client ID, Secret, Tenant ID, Subscription ID)
+- Python 3.x
+- Azure Service Principal with Contributor access.
 
-### Configuration
+### 1. Configuration
 
-Credentials are managed in `terraform.tfvars` (not committed for security):
+1. **Credentials**: Add your Azure details to `terraform.tfvars`.
+2. **Applications**: Configure your GitHub repositories and domains in `automation/dokploy_config.json`.
+3. **Secrets**: Place `.env_<app-name>` files in the root or `automation/` folder; the script will find and inject them automatically.
 
-```hcl
-subscription_id = "..."
-client_id       = "..."
-client_secret   = "..."
-tenant_id       = "..."
-```
+### 2. Deployment (One-Click)
 
-### Infrastructure Deployment
+To build the entire environment from scratch:
 
 ```bash
 terraform init
 terraform apply -auto-approve
 ```
 
-### Dokploy Installation
+The `terraform apply` command is integrated with the Python automation script. Once the VM is ready, it will automatically:
 
-Once the VM is up, Dokploy is installed via:
+- Install Docker & Dokploy.
+- Create your Project and Environments.
+- Register your local SSH key.
+- Deploy all applications defined in your config.
+
+### 3. Manual Automation & Management
+
+You can trigger the automation independently or perform a "Clean Rebuild" of the applications without destroying the Azure infrastructure:
 
 ```bash
-curl -sSL https://dokploy.com/install.sh | sudo sh
+# Full Application Sync/Rebuild
+python automation/dokploy_automate.py --url http://<PUBLIC_IP>:3000 --email admin@example.com --password "PASSWORD" --clean
 ```
 
-Access the dashboard at `http://<PUBLIC_IP>:3000`.
+## 🔍 Verification
 
-## 📖 Documentation Artifacts
+Check the status of your deployments:
 
-Detailed technical details can be found in the [brain/](.gemini/antigravity/brain/) directory:
+```bash
+python automation/verify_deployment.py --url http://<PUBLIC_IP>:3000 --email admin@example.com --password "PASSWORD"
+```
 
-- [Implementation Plan](.gemini/antigravity/brain/a17bde83-6f48-4464-9e8b-bf92103cd4da/implementation_plan.md)
-- [Walkthrough](.gemini/antigravity/brain/a17bde83-6f48-4464-9e8b-bf92103cd4da/walkthrough.md)
-- [Task Log](.gemini/antigravity/brain/a17bde83-6f48-4464-9e8b-bf92103cd4da/task.md)
+## 🔐 Security & Persistence
 
----
-*Created by Antigravity*
+- **SSH Keys**: The script automatically registers your local public key in Dokploy for secure Git cloning.
+- **Disk Persistence**: Docker data is symlinked to a managed disk at `/mnt/dokploy-data`, ensuring your data survives VM reboots or rebuilds.
+- **Secrets Protection**: The `.gitignore` is pre-configured to prevent `.env` files and `terraform.tfvars` from being pushed to version control.
+
+## Credits
+
+Developed with Antigravity 🛸

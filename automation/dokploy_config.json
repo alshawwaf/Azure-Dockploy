@@ -1,0 +1,10 @@
+[
+    {
+        "name": "Lakera-Demo",
+        "repo": "https://github.com/alshawwaf/Lakera-Demo.git",
+        "domain": "lakera.alshawwaf.ca",
+        "service": "web",
+        "port": 9000,
+        "hostPort": 9000
+    }
+]
