@@ -15,6 +15,22 @@ provider "azurerm" {
   tenant_id       = var.tenant_id
 }
 
+locals {
+  # Parse the Dokploy config JSON
+  dokploy_config = jsondecode(file("${path.module}/automation/dokploy_config.json"))
+
+  # Extract subdomains from the 'domain' field in each app entry
+  # Example: "lakera.alshawwaf.ca" -> "lakera"
+  app_subdomains = [
+    for app in local.dokploy_config :
+    replace(app.domain, ".${var.godaddy_domain}", "")
+  ]
+
+  # Final list: All app subdomains + the dokploy portal itself
+  # Use toset to remove duplicates
+  managed_subdomains = toset(concat(local.app_subdomains, ["dokploy"]))
+}
+
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
   location = var.location
@@ -242,7 +258,7 @@ resource "null_resource" "dokploy_setup" {
 }
 
 resource "null_resource" "godaddy_dns" {
-  for_each   = var.enable_godaddy_dns ? toset(var.godaddy_subdomains) : []
+  for_each   = var.enable_godaddy_dns ? local.managed_subdomains : []
   depends_on = [azurerm_public_ip.pip]
 
   triggers = {
