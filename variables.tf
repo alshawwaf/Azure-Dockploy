@@ -76,7 +76,19 @@ variable "enable_dokploy_setup" {
 variable "enable_godaddy_dns" {
   type        = bool
   description = "Whether to manage GoDaddy DNS records"
-  default     = true
+  default     = false
+}
+
+variable "godaddy_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "godaddy_api_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
 }
 
 variable "godaddy_api_key" {
