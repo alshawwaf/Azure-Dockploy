@@ -56,6 +56,32 @@ You can trigger the automation independently or perform a "Clean Rebuild" of the
 python automation/dokploy_automate.py --url http://<PUBLIC_IP>:3000 --email admin@example.com --password "PASSWORD" --clean
 ```
 
+## 🌐 DNS Management (GoDaddy)
+
+A dedicated script `automation/godaddy_dns.py` is included to manage your GoDaddy DNS records automatically.
+
+### Prerequisites
+
+1. Generate an API Key and Secret at [developer.godaddy.com](https://developer.godaddy.com/keys).
+2. Set them as environment variables:
+
+   ```bash
+   export GODADDY_API_KEY="your_key"
+   export GODADDY_API_SECRET="your_secret"
+   ```
+
+### Usage
+
+```bash
+# Set an A record for lakera.alshawwaf.ca
+python automation/godaddy_dns.py --domain alshawwaf.ca --subdomain lakera --ip 20.151.202.86 --set
+
+# Remove the A record
+python automation/godaddy_dns.py --domain alshawwaf.ca --subdomain lakera --remove
+```
+
+Logs are stored in `automation/godaddy_dns.log`.
+
 ## 🔍 Verification
 
 Check the status of your deployments:
