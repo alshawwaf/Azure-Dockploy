@@ -60,7 +60,7 @@ python automation/dokploy_automate.py --url http://<PUBLIC_IP>:3000 --email admi
 
 A dedicated script `automation/godaddy_dns.py` is included to manage your GoDaddy DNS records automatically.
 
-### Prerequisites
+### DNS Prerequisites
 
 1. Generate an API Key and Secret at [developer.godaddy.com](https://developer.godaddy.com/keys).
 2. Set them as environment variables:
