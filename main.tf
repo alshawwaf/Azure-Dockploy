@@ -242,12 +242,12 @@ resource "null_resource" "dokploy_setup" {
 }
 
 resource "null_resource" "godaddy_dns" {
-  count      = var.enable_godaddy_dns ? 1 : 0
+  for_each   = var.enable_godaddy_dns ? toset(var.godaddy_subdomains) : []
   depends_on = [azurerm_public_ip.pip]
 
   triggers = {
     domain     = var.godaddy_domain
-    subdomain  = var.godaddy_subdomain
+    subdomain  = each.value
     ip         = azurerm_public_ip.pip.ip_address
     api_key    = var.godaddy_api_key
     api_secret = var.godaddy_api_secret
@@ -255,7 +255,7 @@ resource "null_resource" "godaddy_dns" {
 
   # Set record on apply
   provisioner "local-exec" {
-    command = "python automation/godaddy_dns.py --domain ${var.godaddy_domain} --subdomain ${var.godaddy_subdomain} --ip ${azurerm_public_ip.pip.ip_address} --set"
+    command = "python automation/godaddy_dns.py --domain ${var.godaddy_domain} --subdomain ${each.value} --ip ${azurerm_public_ip.pip.ip_address} --set"
     environment = {
       GODADDY_API_KEY    = var.godaddy_api_key
       GODADDY_API_SECRET = var.godaddy_api_secret

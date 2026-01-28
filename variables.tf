@@ -96,7 +96,7 @@ variable "godaddy_domain" {
   default = "alshawwaf.ca"
 }
 
-variable "godaddy_subdomain" {
-  type    = string
-  default = "lakera"
+variable "godaddy_subdomains" {
+  type    = list(string)
+  default = ["lakera"]
 }
