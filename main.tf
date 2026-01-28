@@ -229,6 +229,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
 }
 
 resource "null_resource" "dokploy_setup" {
+  count      = var.enable_dokploy_setup ? 1 : 0
   depends_on = [azurerm_linux_virtual_machine.vm, azurerm_virtual_machine_data_disk_attachment.data_attach]
 
   triggers = {
@@ -237,6 +238,38 @@ resource "null_resource" "dokploy_setup" {
 
   provisioner "local-exec" {
     command = "python automation/dokploy_automate.py --url http://${azurerm_public_ip.pip.ip_address}:3000 --email ${var.dokploy_admin_email} --password ${var.dokploy_admin_password} --config automation/dokploy_config.json"
+  }
+}
+
+resource "null_resource" "godaddy_dns" {
+  count      = var.enable_godaddy_dns ? 1 : 0
+  depends_on = [azurerm_public_ip.pip]
+
+  triggers = {
+    domain     = var.godaddy_domain
+    subdomain  = var.godaddy_subdomain
+    ip         = azurerm_public_ip.pip.ip_address
+    api_key    = var.godaddy_api_key
+    api_secret = var.godaddy_api_secret
+  }
+
+  # Set record on apply
+  provisioner "local-exec" {
+    command = "python automation/godaddy_dns.py --domain ${var.godaddy_domain} --subdomain ${var.godaddy_subdomain} --ip ${azurerm_public_ip.pip.ip_address} --set"
+    environment = {
+      GODADDY_API_KEY    = var.godaddy_api_key
+      GODADDY_API_SECRET = var.godaddy_api_secret
+    }
+  }
+
+  # Remove record on destroy
+  provisioner "local-exec" {
+    when    = destroy
+    command = "python automation/godaddy_dns.py --domain ${self.triggers.domain} --subdomain ${self.triggers.subdomain} --remove"
+    environment = {
+      GODADDY_API_KEY    = self.triggers.api_key
+      GODADDY_API_SECRET = self.triggers.api_secret
+    }
   }
 }
 

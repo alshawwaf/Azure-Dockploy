@@ -66,3 +66,37 @@ variable "dokploy_admin_password" {
   type      = string
   sensitive = true
 }
+
+variable "enable_dokploy_setup" {
+  type        = bool
+  description = "Whether to run the Dokploy automation script"
+  default     = true
+}
+
+variable "enable_godaddy_dns" {
+  type        = bool
+  description = "Whether to manage GoDaddy DNS records"
+  default     = true
+}
+
+variable "godaddy_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "godaddy_api_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "godaddy_domain" {
+  type    = string
+  default = "alshawwaf.ca"
+}
+
+variable "godaddy_subdomain" {
+  type    = string
+  default = "lakera"
+}

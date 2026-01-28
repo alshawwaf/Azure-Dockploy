@@ -58,26 +58,26 @@ python automation/dokploy_automate.py --url http://<PUBLIC_IP>:3000 --email admi
 
 ## 🌐 DNS Management (GoDaddy)
 
-A dedicated script `automation/godaddy_dns.py` is included to manage your GoDaddy DNS records automatically.
+DNS management is now integrated directly into the Terraform lifecycle. When enabled, Terraform will automatically create/update the A record on `apply` and remove it on `destroy`.
 
-### DNS Prerequisites
+### 1. Configuration (terraform.tfvars)
 
-1. Generate an API Key and Secret at [developer.godaddy.com](https://developer.godaddy.com/keys).
-2. Set them as environment variables:
+Add your GoDaddy credentials and domain settings to your `terraform.tfvars`:
 
-   ```bash
-   export GODADDY_API_KEY="your_key"
-   export GODADDY_API_SECRET="your_secret"
-   ```
+```hcl
+enable_godaddy_dns = true  # Toggle DNS automation (default: true)
+godaddy_api_key    = "your_api_key"
+godaddy_api_secret = "your_api_secret"
+godaddy_domain     = "example.com"
+godaddy_subdomain  = "app"
+```
 
-### Usage
+### 2. Manual Usage (Optional)
+
+You can still run the script manually if needed:
 
 ```bash
-# Set an A record for lakera.alshawwaf.ca
-python automation/godaddy_dns.py --domain alshawwaf.ca --subdomain lakera --ip 20.151.202.86 --set
-
-# Remove the A record
-python automation/godaddy_dns.py --domain alshawwaf.ca --subdomain lakera --remove
+python automation/godaddy_dns.py --domain example.com --subdomain app --ip <IP> --set
 ```
 
 Logs are stored in `automation/godaddy_dns.log`.
