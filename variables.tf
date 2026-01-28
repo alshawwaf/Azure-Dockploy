@@ -89,3 +89,15 @@ variable "godaddy_domain" {
 }
 
 
+
+variable "godaddy_api_key" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
+
+variable "godaddy_api_secret" {
+  type      = string
+  sensitive = true
+  default   = ""
+}
