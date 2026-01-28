@@ -73,27 +73,3 @@ variable "enable_dokploy_setup" {
   default     = true
 }
 
-variable "enable_godaddy_dns" {
-  type        = bool
-  description = "Whether to manage GoDaddy DNS records"
-  default     = false
-}
-
-
-
-
-
-variable "godaddy_domain" {
-  type    = string
-  default = "alshawwaf.ca"
-}
-
-
-
-
-
-variable "godaddy_api_secret" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
