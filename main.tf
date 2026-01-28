@@ -15,21 +15,7 @@ provider "azurerm" {
   tenant_id       = var.tenant_id
 }
 
-locals {
-  # Parse the Dokploy config JSON
-  dokploy_config = jsondecode(file("${path.module}/automation/dokploy_config.json"))
 
-  # Extract subdomains from the 'domain' field in each app entry
-  # Example: "lakera.alshawwaf.ca" -> "lakera"
-  app_subdomains = [
-    for app in local.dokploy_config :
-    replace(app.domain, ".${var.godaddy_domain}", "")
-  ]
-
-  # Final list: All app subdomains + the dokploy portal itself
-  # Use toset to remove duplicates
-  managed_subdomains = toset(concat(local.app_subdomains, ["dokploy"]))
-}
 
 resource "azurerm_resource_group" "rg" {
   name     = var.resource_group_name
@@ -257,37 +243,7 @@ resource "null_resource" "dokploy_setup" {
   }
 }
 
-resource "null_resource" "godaddy_dns" {
-  for_each   = var.enable_godaddy_dns ? local.managed_subdomains : []
-  depends_on = [azurerm_public_ip.pip]
 
-  triggers = {
-    domain     = var.godaddy_domain
-    subdomain  = each.value
-    ip         = azurerm_public_ip.pip.ip_address
-    api_key    = var.godaddy_api_key
-    api_secret = var.godaddy_api_secret
-  }
-
-  # Set record on apply
-  provisioner "local-exec" {
-    command = "python automation/godaddy_dns.py --domain ${var.godaddy_domain} --subdomain ${each.value} --ip ${azurerm_public_ip.pip.ip_address} --set"
-    environment = {
-      GODADDY_API_KEY    = var.godaddy_api_key
-      GODADDY_API_SECRET = var.godaddy_api_secret
-    }
-  }
-
-  # Remove record on destroy
-  provisioner "local-exec" {
-    when    = destroy
-    command = "python automation/godaddy_dns.py --domain ${self.triggers.domain} --subdomain ${self.triggers.subdomain} --remove"
-    environment = {
-      GODADDY_API_KEY    = self.triggers.api_key
-      GODADDY_API_SECRET = self.triggers.api_secret
-    }
-  }
-}
 
 resource "azurerm_dev_test_global_vm_shutdown_schedule" "shutdown" {
   virtual_machine_id = azurerm_linux_virtual_machine.vm.id

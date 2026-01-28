@@ -53,9 +53,6 @@ class GoDaddyDNS:
     def remove_a_records(self, domain, subdomain):
         """
         Removes A records for a subdomain.
-        Note: GoDaddy API doesn't have a direct 'delete' for a specific record easily via /records/{type}/{name}.
-        Usually, you DELETE /v1/domains/{domain}/records/{type}/{name}, but let's check documented behavior.
-        Actually, the recommended way to 'delete' is often to provide an empty list or use the DELETE method if supported.
         """
         url = f"{self.base_url}/v1/domains/{domain}/records/A/{subdomain}"
 

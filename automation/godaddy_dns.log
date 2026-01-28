@@ -8,3 +8,21 @@
 
 2026-01-27 20:25:38,690 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
 
+2026-01-27 20:36:28,078 - INFO - Setting A record for lakera.alshawwaf.ca to 20.151.202.86...
+2026-01-27 20:36:28,078 - INFO - Setting A record for dokploy.alshawwaf.ca to 20.151.202.86...
+2026-01-27 20:36:28,479 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
+
+2026-01-27 20:36:28,566 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
+
+2026-01-27 20:37:07,425 - INFO - Setting A record for dokploy.alshawwaf.ca to 20.151.202.86...
+2026-01-27 20:37:07,434 - INFO - Setting A record for lakera.alshawwaf.ca to 20.151.202.86...
+2026-01-27 20:37:07,831 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
+
+2026-01-27 20:37:08,013 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
+
+2026-01-27 20:39:00,302 - INFO - Setting A record for lakera.alshawwaf.ca to 20.151.202.86...
+2026-01-27 20:39:00,320 - INFO - Setting A record for dokploy.alshawwaf.ca to 20.151.202.86...
+2026-01-27 20:39:00,752 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
+
+2026-01-27 20:39:00,762 - ERROR - Failed to set A record: 403 - {"code":"ACCESS_DENIED","message":"Authenticated user is not allowed access"}
+
