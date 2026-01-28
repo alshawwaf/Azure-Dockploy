@@ -79,29 +79,9 @@ variable "enable_godaddy_dns" {
   default     = false
 }
 
-variable "godaddy_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
 
-variable "godaddy_api_secret" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
 
-variable "godaddy_api_key" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
 
-variable "godaddy_api_secret" {
-  type      = string
-  sensitive = true
-  default   = ""
-}
 
 variable "godaddy_domain" {
   type    = string
