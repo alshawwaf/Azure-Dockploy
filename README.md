@@ -28,7 +28,18 @@ This project provides a **one-click, hardened automation** to deploy a productio
 ### 1. Configuration
 
 1. **Credentials**: Add your Azure details to `terraform.tfvars`.
-2. **Applications**: Configure your GitHub repositories and domains in `automation/dokploy_config.json`.
+2. **Applications**: Configure your GitHub repositories and domains in `automation/dokploy_config.json`. Supports multi-domain deployments!
+    ```json
+    {
+      "name": "My App",
+      "repo": "https://github.com/...",
+      "service": "app",
+      "exposures": [
+        {"domain": "app.example.com", "port": 3000},
+        {"domain": "api.example.com", "port": 8080}
+      ]
+    }
+    ```
 3. **Secrets**: Place `.env_<app-name>` files in the root or `automation/` folder; the script will find and inject them automatically.
 
 ### 2. Deployment (One-Click)

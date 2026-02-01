@@ -55,16 +55,27 @@ def verify(url, email, password):
             project_details = resp_one.json()[0]["result"]["data"]["json"]
 
             for env in project_details.get("environments", []):
-                print(f" Environment: {env['name']} ({env['environmentId']})")
+                env_id = env['environmentId']
+                print(f" Environment: {env['name']} ({env_id})")
 
-                # Compose apps are often listed directly in the environment details in newer Dokploy
-                composes = env.get("composes", [])
+                # Fetch full environment details to get apps/compose
+                trpc_env_one = f"{url}/api/trpc/environment.one?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{env_id}%22%7D%7D%7D"
+                env_resp = s.get(trpc_env_one, timeout=30)
+                env_details = env_resp.json()[0]["result"]["data"]["json"]
 
-                if not composes:
-                    print("  (No compose applications found in this environment)")
+                composes = env_details.get("compose", [])
+                apps = env_details.get("applications", [])
+
+                if not composes and not apps:
+                    print("  (No services found in this environment)")
+                
                 for c in composes:
                     print(
-                        f"  - {c['name']} | Status: {c['composeStatus']} | Created: {c['createdAt']}"
+                        f"  [Compose] {c['name']} | Status: {c['composeStatus']} | Created: {c['createdAt']}"
+                    )
+                for a in apps:
+                    print(
+                        f"  [App] {a['name']} | Status: {a['applicationStatus']} | Created: {a['createdAt']}"
                     )
 
     except Exception as e:

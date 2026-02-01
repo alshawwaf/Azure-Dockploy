@@ -22,6 +22,7 @@ def request_with_retry(
             print(f"DEBUG: [RES] {response.status_code} ({duration:.2f}s)")
 
             if response.status_code < 500:
+                print(f"DEBUG: [BODY] {response.text[:200]}...")
                 return response
 
             print(f"DEBUG: Server error {response.status_code}, retrying...")
@@ -224,12 +225,27 @@ def setup_ssh_and_server(
         return None
 
 
-def delete_existing_apps(url, cookies, env_id):
-    """Delete all single-container applications in the environment."""
-    trpc_url_all = f"{url}/api/trpc/application.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{env_id}%22%7D%7D%7D"
+def delete_all_services(url, cookies, env_id):
+    """Delete all services (apps and compose) in the environment using environment.one."""
+    trpc_url_one = f"{url}/api/trpc/environment.one?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{env_id}%22%7D%7D%7D"
     try:
-        resp = request_with_retry("GET", trpc_url_all, cookies=cookies)
-        apps = resp.json()[0]["result"]["data"]["json"]
+        resp = request_with_retry("GET", trpc_url_one, cookies=cookies)
+        env_data = resp.json()[0]["result"]["data"]["json"]
+
+        # Delete Compose Applications
+        composes = env_data.get("compose", [])
+        for comp in composes:
+            print(f"Deleting compose app: {comp['name']}...")
+            trpc_url_del = f"{url}/api/trpc/compose.delete?batch=1"
+            request_with_retry(
+                "POST",
+                trpc_url_del,
+                json={"0": {"json": {"composeId": comp["composeId"], "deleteVolumes": True}}},
+                cookies=cookies,
+            )
+
+        # Delete Single Applications
+        apps = env_data.get("applications", [])
         for app in apps:
             print(f"Deleting application: {app['name']}...")
             trpc_url_del = f"{url}/api/trpc/application.delete?batch=1"
@@ -240,30 +256,7 @@ def delete_existing_apps(url, cookies, env_id):
                 cookies=cookies,
             )
     except Exception as e:
-        print(f"DEBUG: Warning - could not delete apps: {e}")
-        pass
-
-
-def delete_existing_compose(url, cookies, env_id):
-    """Delete all compose applications in the environment."""
-    trpc_url_all = f"{url}/api/trpc/compose.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{env_id}%22%7D%7D%7D"
-    try:
-        resp = requests.get(trpc_url_all, cookies=cookies, timeout=30)
-        apps = resp.json()[0]["result"]["data"]["json"]
-        for app in apps:
-            print(f"Deleting compose app: {app['name']}...")
-            trpc_url_del = f"{url}/api/trpc/compose.delete?batch=1"
-            requests.post(
-                trpc_url_del,
-                json={
-                    "0": {
-                        "json": {"composeId": app["composeId"], "deleteVolumes": True}
-                    }
-                },
-                cookies=cookies,
-                timeout=30,
-            )
-    except Exception:
+        print(f"DEBUG: Warning - could not cleanup services: {e}")
         pass
 
 
@@ -401,7 +394,7 @@ def create_compose(url, cookies, project_id, environment_id, name, server_id):
 
 
 def update_compose_git(
-    url, cookies, compose_id, github_url, ssh_key_id=None, branch="main"
+    url, cookies, compose_id, github_url, env_vars=None, ssh_key_id=None, branch="main"
 ):
     """Connect GitHub repo to Compose app."""
     trpc_url = f"{url}/api/trpc/compose.update?batch=1"
@@ -418,6 +411,9 @@ def update_compose_git(
         "enableSubmodules": False,
         "randomize": True,  # Ensure no port conflicts
     }
+
+    if env_vars:
+        json_payload["env"] = env_vars
 
     meta_payload = {"values": {}}
     if ssh_key_id is None:
@@ -541,26 +537,6 @@ def wait_for_server_ready(url, cookies, server_id, timeout=300):
     return False
 
 
-def delete_existing_compose(url, cookies, environment_id):
-    """Delete all existing compose apps in an environment."""
-    trpc_url_one = f"{url}/api/trpc/project.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%7D%7D"
-    try:
-        data = request_with_retry("GET", trpc_url_one, cookies=cookies).json()
-        projects = data[0]["result"]["data"]["json"]
-        for project in projects:
-            for env in project.get("environments", []):
-                if env["environmentId"] == environment_id:
-                    for comp in env.get("composes", []):
-                        print(f"Deleting existing compose: {comp['name']}...")
-                        trpc_del = f"{url}/api/trpc/compose.delete?batch=1"
-                        request_with_retry(
-                            "POST",
-                            trpc_del,
-                            json={"0": {"json": {"composeId": comp["composeId"]}}},
-                            cookies=cookies,
-                        )
-    except Exception as e:
-        print(f"Error deleting compose apps: {e}")
 
 
 if __name__ == "__main__":
@@ -734,8 +710,7 @@ if __name__ == "__main__":
             project_id, env_id = create_project(url, cookies, org_id, name=args.project)
 
         print("Cleaning up existing deployments...")
-        delete_existing_apps(url, cookies, env_id)
-        delete_existing_compose(url, cookies, env_id)
+        delete_all_services(url, cookies, env_id)
 
         for cfg in app_configs:
             cid = create_compose(
@@ -751,26 +726,38 @@ if __name__ == "__main__":
                     )
                     ssh_key_to_use = None
 
-                update_compose_git(url, cookies, cid, repo_url, ssh_key_to_use)
-
-                # Try to detect and inject .env file
+                # Detect .env file early to combine with git update
                 env_file = detect_env_file(cfg["name"])
+                env_content = None
                 if env_file:
                     print(f"Found environment file for {cfg['name']}: {env_file}")
                     try:
                         with open(env_file, "r") as f:
                             env_content = f.read()
-                        update_compose_env(url, cookies, cid, env_content)
                     except Exception as e:
-                        print(
-                            f"Warning: Could not read/inject env file {env_file}: {e}"
-                        )
+                        print(f"Warning: Could not read env file {env_file}: {e}")
                 else:
                     print(f"No environment file found for {cfg['name']}.")
 
-                create_domain(
-                    url, cookies, cid, cfg["domain"], cfg["port"], cfg["service"]
+                update_compose_git(
+                    url, cookies, cid, repo_url, env_content, ssh_key_to_use
                 )
+
+                if "exposures" in cfg:
+                    print(f"Setting up multiple domains for {cfg['name']}...")
+                    for exp in cfg["exposures"]:
+                        create_domain(
+                            url,
+                            cookies,
+                            cid,
+                            exp["domain"],
+                            exp["port"],
+                            exp["service"],
+                        )
+                elif "domain" in cfg:
+                    create_domain(
+                        url, cookies, cid, cfg["domain"], cfg["port"], cfg["service"]
+                    )
                 deploy_compose(url, cookies, cid)
 
         print("\n" + "=" * 60 + "\nDOKPLOY COMPOSE AUTOMATION COMPLETE!\n" + "=" * 60)

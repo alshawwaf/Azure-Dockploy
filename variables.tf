@@ -54,7 +54,7 @@ variable "admin_ssh_key" {
 variable "data_disk_size" {
   type        = number
   description = "Size of the persistent data disk in GB"
-  default     = 64
+  default     = 128
 }
 
 variable "dokploy_admin_email" {
