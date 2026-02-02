@@ -105,6 +105,7 @@ python automation/verify_deployment.py --url http://<PUBLIC_IP>:3000 --email adm
 
 - **SSH Keys**: The script automatically registers your local public key in Dokploy for secure Git cloning.
 - **Disk Persistence**: Docker data is symlinked to a managed disk at `/mnt/dokploy-data`, ensuring your data survives VM reboots or rebuilds.
+- **Inter-Container Networking**: For multi-service applications (like Training Portal), Ensure both frontend and backend join the `dokploy-network` to enable internal DNS resolution.
 - **Secrets Protection**: The `.gitignore` is pre-configured to prevent `.env` files and `terraform.tfvars` from being pushed to version control.
 
 ## Credits
