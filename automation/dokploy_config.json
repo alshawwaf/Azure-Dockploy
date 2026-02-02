@@ -25,5 +25,12 @@
             {"domain": "langflow.alshawwaf.ca", "service": "langflow", "port": 7860},
             {"domain": "qdrant.alshawwaf.ca", "service": "qdrant", "port": 6333}
         ]
+    },
+    {
+        "name": "Dev-Hub",
+        "repo": "https://github.com/alshawwaf/dev-hub.git",
+        "domain": "hub.alshawwaf.ca",
+        "service": "frontend",
+        "port": 80
     }
 ]
