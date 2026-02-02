@@ -8,8 +8,15 @@
         "hostPort": 9000
     },
     {
+        "name": "Training Portal",
+        "repo": "git@github.com:alshawwaf/training-portal.git",
+        "domain": "training.alshawwaf.ca",
+        "service": "frontend",
+        "port": 9090
+    },
+    {
         "name": "CP Agentic MCP Playground",
-        "repo": "https://github.com/alshawwaf/cp-agentic-mcp-playground.git",
+        "repo": "git@github.com:alshawwaf/cp-agentic-mcp-playground.git",
         "service": "n8n",
         "exposures": [
             {"domain": "n8n.alshawwaf.ca", "service": "n8n", "port": 5678},
