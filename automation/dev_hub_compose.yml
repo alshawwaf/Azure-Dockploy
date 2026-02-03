@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  dev-hub-db-service:
+    image: postgres:15-alpine
+    container_name: dev_hub_db
+    restart: always
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=dev_hub
+    volumes:
+      - dev_hub_db_data:/var/lib/postgresql/data
+    networks:
+      - dokploy-network
+
+  dev-hub-backend:
+    build: ./backend
+    container_name: dev_hub_backend
+    restart: always
+    environment:
+      - DATABASE_URL=postgresql://admin:password@dev-hub-db-service:5432/dev_hub
+      - SECRET_KEY=production_secret_key_123
+    depends_on:
+      - dev-hub-db-service
+    networks:
+      - dokploy-network
+
+  dev-hub-frontend:
+    build: ./frontend
+    container_name: dev_hub_frontend
+    restart: always
+    depends_on:
+      - dev-hub-backend
+    networks:
+      - dokploy-network
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.docker.network=dokploy-network'
+      - "traefik.http.routers.dev-hub.rule=Host('hub.alshawwaf.ca')"
+      - 'traefik.http.routers.dev-hub.entrypoints=web'
+      - 'traefik.http.services.dev-hub.loadbalancer.server.port=80'
+
+networks:
+  dokploy-network:
+    external: true
+
+volumes:
+  dev_hub_db_data:

@@ -1,10 +1,16 @@
-import requests
 import time
 import argparse
 import sys
 import subprocess
 import json
 import os
+
+# Ensure requests is installed (for fresh VM environments)
+try:
+    import requests
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+    import requests
 
 print("DEBUG: Script started...")
 
@@ -261,7 +267,7 @@ def delete_all_services(url, cookies, env_id):
 
 
 def get_all_project_ids(url, cookies):
-    """Find all existing projects and return their IDs and Env IDs."""
+    """Find all existing projects and return their IDs and a list of all Env IDs."""
     trpc_url = f"{url}/api/trpc/project.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3Anull%2C%22meta%22%3A%7B%22values%22%3A%5B%22undefined%22%5D%7D%7D%7D"
     matches = []
     try:
@@ -270,11 +276,26 @@ def get_all_project_ids(url, cookies):
         projects = data[0]["result"]["data"]["json"]
         for p in projects:
             projectId = p["projectId"]
-            env_id = get_environment_id(url, cookies, projectId)
-            matches.append((projectId, env_id, p["name"]))
+            env_ids = get_all_environment_ids(url, cookies, projectId)
+            matches.append((projectId, env_ids, p["name"]))
     except Exception as e:
         print(f"DEBUG: Error listing all projects: {e}")
     return matches
+
+
+def get_all_environment_ids(url, cookies, project_id):
+    """Get all environment IDs for the project."""
+    trpc_url = f"{url}/api/trpc/project.one?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22projectId%22%3A%22{project_id}%22%7D%7D%7D"
+    ids = []
+    try:
+        response = requests.get(trpc_url, cookies=cookies, timeout=30)
+        data = response.json()
+        environments = data[0]["result"]["data"]["json"]["environments"]
+        for env in environments:
+            ids.append(env["environmentId"])
+    except Exception:
+        pass
+    return ids
 
 
 def get_environment_id(url, cookies, project_id):
@@ -298,9 +319,13 @@ def delete_project(url, cookies, project_id):
     trpc_url_del = f"{url}/api/trpc/project.delete?batch=1"
     payload = {"0": {"json": {"projectId": project_id}}}
     try:
-        requests.post(trpc_url_del, json=payload, cookies=cookies, timeout=30)
-        print("Project deleted.")
-        return True
+        resp = requests.post(trpc_url_del, json=payload, cookies=cookies, timeout=30)
+        if resp.status_code == 200:
+            print("Project deleted.")
+            return True
+        else:
+            print(f"Failed to delete project: {resp.status_code}")
+            return False
     except Exception as e:
         print(f"Error deleting project: {e}")
         return False
@@ -361,10 +386,18 @@ def create_project(url, cookies, organization_id, name="Agentic Demos"):
     try:
         response = requests.post(trpc_url, json=payload, cookies=cookies, timeout=30)
         data = response.json()
-        project_data = data[0]["result"]["data"]["json"]["project"]
-        env_data = data[0]["result"]["data"]["json"]["environment"]
+        print(f"DEBUG: Create project response structure: {list(data[0].keys())}")
+        result = data[0].get("result", {})
+        if "error" in result:
+             print(f"Error creating project: {result['error']}")
+             return None, None
+             
+        project_data = result["data"]["json"]["project"]
+        env_data = result["data"]["json"]["environment"]
+        print(f"DEBUG: Created Project ID: {project_data.get('projectId')}, Env ID: {env_data.get('environmentId')}")
         return project_data["projectId"], env_data["environmentId"]
-    except Exception:
+    except Exception as e:
+        print(f"Exception creating project: {e}")
         return None, None
 
 
@@ -393,8 +426,31 @@ def create_compose(url, cookies, project_id, environment_id, name, server_id):
         return None
 
 
+def get_all_compose_ids(url, cookies, environment_id):
+    """Fetch all compose apps for a given environment."""
+    trpc_url = f"{url}/api/trpc/compose.all?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22environmentId%22%3A%22{environment_id}%22%7D%7D%7D"
+    try:
+        resp = requests.get(trpc_url, cookies=cookies, timeout=10).json()
+        apps = resp[0]["result"]["data"]["json"]
+        return [{"name": a["name"], "composeId": a["composeId"]} for a in apps]
+    except Exception as e:
+        print(f"Error fetching compose apps: {e}")
+        return []
+
+
+def get_compose_app_name(url, cookies, compose_id):
+    """Fetch the full appName (with suffix) for a compose service."""
+    trpc_url = f"{url}/api/trpc/compose.one?batch=1&input=%7B%220%22%3A%7B%22json%22%3A%7B%22composeId%22%3A%22{compose_id}%22%7D%7D%7D"
+    try:
+        resp = requests.get(trpc_url, cookies=cookies, timeout=10).json()
+        return resp[0]["result"]["data"]["json"]["appName"]
+    except Exception as e:
+        print(f"Error fetching app name: {e}")
+        return None
+
+
 def update_compose_git(
-    url, cookies, compose_id, github_url, env_vars=None, ssh_key_id=None, branch="main"
+    url, cookies, compose_id, github_url, env_vars=None, ssh_key_id=None, branch="main", compose_command=None
 ):
     """Connect GitHub repo to Compose app."""
     trpc_url = f"{url}/api/trpc/compose.update?batch=1"
@@ -412,8 +468,13 @@ def update_compose_git(
         "randomize": True,  # Ensure no port conflicts
     }
 
+    if compose_command:
+        json_payload["command"] = compose_command
+        print(f"Setting compose command: {compose_command}")
+
     if env_vars:
         json_payload["env"] = env_vars
+        json_payload["envVars"] = env_vars
 
     meta_payload = {"values": {}}
     if ssh_key_id is None:
@@ -454,6 +515,29 @@ def create_domain(url, cookies, compose_id, host, port, service_name):
         request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
     except Exception as e:
         print(f"Error creating domain: {e}")
+
+
+def update_compose_file(url, cookies, compose_id, compose_content, source_type=None):
+    """Update the docker-compose.yml content for a Compose application."""
+    trpc_url = f"{url}/api/trpc/compose.update?batch=1"
+    json_data = {
+        "composeId": compose_id,
+    }
+    if compose_content is not None:
+        json_data["composeFile"] = compose_content
+    if source_type:
+        json_data["sourceType"] = source_type
+        
+    payload = {
+        "0": {
+            "json": json_data
+        }
+    }
+    print(f"Updating compose file for {compose_id} (sourceType={source_type})...")
+    try:
+        request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
+    except Exception as e:
+        print(f"Error updating compose file: {e}")
 
 
 def update_compose_env(url, cookies, compose_id, env_content):
@@ -537,7 +621,25 @@ def wait_for_server_ready(url, cookies, server_id, timeout=300):
     return False
 
 
-
+def sanitize_compose_file(content, app_name):
+    """Remove problematic lines like bind mounts that hide image code."""
+    # Common fixes for all apps:
+    # 1. Replace ~ with a relative path to avoid "invalid proto" errors in some Docker versions
+    content = content.replace("~/.flowise", "./flowise_data")
+    content = content.replace("~/.n8n", "./n8n_data")
+    content = content.replace("~/.docker", "./docker_config")
+    
+    if "Lakera" in app_name:
+        # Remove common bind mount that blinds the container: .:/app
+        lines = content.splitlines()
+        new_lines = []
+        for line in lines:
+            if ".:/app" in line:
+                print(f"Sanitizing line in {app_name}: {line.strip()}")
+                continue
+            new_lines.append(line)
+        return "\n".join(new_lines)
+    return content
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -570,12 +672,67 @@ if __name__ == "__main__":
         action="store_true",
         help="Delete existing project before starting (Fresh Rebuild)",
     )
+    parser.add_argument("--app", help="Filter: Only process this specific app name")
 
     args = parser.parse_args()
     url = args.url.rstrip("/")
     ip_address = args.ip or url.split("//")[-1].split(":")[0]
 
-    # Expand user paths
+    # Helper to find local env files
+    def find_env_file(app_name):
+        slugs = [
+            app_name.lower().replace(" ", "-"),
+            app_name.lower().replace(" ", "_"),
+            app_name.lower(),
+        ]
+        search_dirs = [".", "automation"]
+        for directory in search_dirs:
+            for slug in slugs:
+                path = os.path.join(directory, f".env_{slug}")
+                if os.path.exists(path):
+                    return path
+        return None
+
+    # Helper to copy env file to remote
+    def copy_env_file_to_remote(local_path, remote_ip, app_slug):
+        try:
+            target_path = f"/etc/dokploy/compose/{app_slug}/code/.env"
+            print(f"Ensuring {target_path} on {remote_ip}...")
+            
+            # Check if we're running locally on the target VM
+            is_local = False
+            try:
+                import socket
+                hostname = os.uname()[1] if hasattr(os, 'uname') else socket.gethostname()
+                # Simple check: if ip is reachable on loopback or matches hostname/etc
+                # But safer to just check if the directory exists locally
+                if os.path.exists(f"/etc/dokploy/compose/{app_slug}"):
+                    is_local = True
+            except:
+                pass
+
+            if is_local:
+                print(f"Detected local execution. Copying {local_path} to {target_path}...")
+                subprocess.run(["sudo", "mkdir", "-p", os.path.dirname(target_path)], check=True)
+                subprocess.run(["sudo", "cp", local_path, target_path], check=True)
+                subprocess.run(["sudo", "chown", "root:root", target_path], check=True)
+                subprocess.run(["sudo", "chmod", "644", target_path], check=True)
+            else:
+                scp_cmd = [
+                    "scp", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
+                    local_path, f"adminuser@{remote_ip}:{target_path}"
+                ]
+                subprocess.run(scp_cmd, check=True)
+                # Fix permissions
+                ssh_cmd = [
+                    "ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
+                    f"adminuser@{remote_ip}",
+                    f"sudo chown root:root {target_path} && sudo chmod 644 {target_path}"
+                ]
+                subprocess.run(ssh_cmd, check=True)
+            print("Env file copied successfully.")
+        except Exception as e:
+            print(f"Error copying env file: {e}")
     import os
 
     ssh_private_path = os.path.expanduser(args.ssh_private)
@@ -688,34 +845,82 @@ if __name__ == "__main__":
             print(
                 f"Clean mode: Found {len(all_projects)} total projects. Deleting ALL to ensure fresh state..."
             )
-            for pid, eid, pname in all_projects:
-                print(f"Deleting project: {pname} ({pid})...")
+            for pid, eids, pname in all_projects:
+                print(f"Purging project: {pname} ({pid})...")
+                for eid in eids:
+                    print(f"  Cleaning environment: {eid}")
+                    delete_all_services(url, cookies, eid)
+                
                 delete_project(url, cookies, pid)
 
-            # Additional aggressive cleanup via SSH
-            print("Purging all non-dokploy containers via SSH...")
-            cleanup_cmd = "sudo docker ps -a -q --filter name=lakera-demo | xargs -r sudo docker rm -f"
-            ssh_cmd = f'ssh -o StrictHostKeyChecking=no -i {ssh_private_path} adminuser@{ip_address} "{cleanup_cmd}"'
-            subprocess.run(ssh_cmd, shell=True)
+            # Aggressive cleanup via SSH (Disabled)
+            # print("Performing NUCLEAR Docker cleanup via SSH...")
+            # Delete ALL containers, prune networks, volumes, and images
+            cleanup_cmd = (
+                "sudo docker stop $(sudo docker ps -aq) 2>/dev/null || true; "
+                "sudo docker rm -f $(sudo docker ps -aq) 2>/dev/null || true; "
+                "sudo docker system prune -af --volumes"
+            )
+            try:
+                ssh_cmd = [
+                    "ssh",
+                    "-o", "StrictHostKeyChecking=no",
+                    "-i", ssh_private_path,
+                    f"adminuser@{ip_address}",
+                    cleanup_cmd
+                ]
+                # subprocess.run(ssh_cmd, check=True)
+                # print("SSH Nuclear cleanup completed.")
+            except Exception as e:
+                print(f"Warning: SSH Cleanup encountered an error: {e}")
 
-            time.sleep(5)
+            print("Waiting for Dokploy to stabilize...")
+            time.sleep(10)
             all_projects = []
 
         # Find or create our target project
         existing_target = [p for p in all_projects if p[2] == args.project]
         if existing_target:
-            project_id, env_id, _ = existing_target[0]
-            print(f"Using existing project: {args.project} ({project_id})")
+            project_id, env_ids, _ = existing_target[0]
+            print(f"Found existing project: {args.project} ({project_id}) with env_ids: {env_ids}")
+            # Handle env_ids being a list from get_all_project_ids modification
+            if isinstance(env_ids, list) and len(env_ids) > 0:
+                env_id = env_ids[0]
+            else:
+                env_id = env_ids if env_ids else None
+                
+            if not env_id:
+                print(f"Warning: env_id is null for project {args.project}. Fetching manually...")
+                env_id = get_environment_id(url, cookies, project_id)
         else:
             project_id, env_id = create_project(url, cookies, org_id, name=args.project)
 
-        print("Cleaning up existing deployments...")
-        delete_all_services(url, cookies, env_id)
+        if not project_id or not env_id:
+            print(f"CRITICAL: Failed to establish project/environment context. project_id={project_id}, env_id={env_id}")
+            sys.exit(1)
 
+        if not args.app:
+            print("Cleaning up existing deployments...")
+            delete_all_services(url, cookies, env_id)
+
+        # Fetch existing apps in the environment
+        existing_apps = get_all_compose_ids(url, cookies, env_id)
+        
         for cfg in app_configs:
-            cid = create_compose(
-                url, cookies, project_id, env_id, cfg["name"], server_id
-            )
+            if args.app and args.app.lower() not in cfg["name"].lower():
+                print(f"Skipping {cfg['name']} (filter: {args.app})")
+                continue
+
+            # Check if exists
+            target_app = next((a for a in existing_apps if a["name"] == cfg["name"]), None)
+            
+            if target_app:
+                cid = target_app["composeId"]
+                print(f"Using existing compose application: {cfg['name']} ({cid})")
+            else:
+                cid = create_compose(
+                    url, cookies, project_id, env_id, cfg["name"], server_id
+                )
             if cid:
                 repo_url = cfg["repo"]
                 ssh_key_to_use = git_ssh_key_id
@@ -739,9 +944,21 @@ if __name__ == "__main__":
                 else:
                     print(f"No environment file found for {cfg['name']}.")
 
+                # Get compose command if specified (e.g., "--profile cpu")
+                compose_command = cfg.get("composeCommand", None)
+                
                 update_compose_git(
-                    url, cookies, cid, repo_url, env_content, ssh_key_to_use
+                    url, cookies, cid, repo_url, env_content, ssh_key_to_use,
+                    compose_command=compose_command
                 )
+                
+                # Double-check env vars are injected via API
+                if env_content:
+                    update_compose_env(url, cookies, cid, env_content)
+
+                # Keep sourceType as "git" - let Dokploy pull the docker-compose.yml from GitHub
+                # This is consistent with how other apps in this project are deployed
+                print(f"Using GitHub-linked docker-compose.yml for {cfg['name']}...")
 
                 if "exposures" in cfg:
                     print(f"Setting up multiple domains for {cfg['name']}...")
@@ -758,6 +975,16 @@ if __name__ == "__main__":
                     create_domain(
                         url, cookies, cid, cfg["domain"], cfg["port"], cfg["service"]
                     )
+
                 deploy_compose(url, cookies, cid)
+
+                # Ensure .env file is present on the server (robustness)
+                if env_file:
+                    full_app_name = get_compose_app_name(url, cookies, cid)
+                    if full_app_name:
+                        print(f"Ensuring .env file for {full_app_name}...")
+                        import time
+                        time.sleep(5)  # Give Dokploy a moment to create the directory
+                        copy_env_file_to_remote(env_file, ip_address, full_app_name)
 
         print("\n" + "=" * 60 + "\nDOKPLOY COMPOSE AUTOMATION COMPLETE!\n" + "=" * 60)
