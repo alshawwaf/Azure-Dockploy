@@ -1,11 +1,11 @@
 variable "resource_group_name" {
   type    = string
-  default = "dokploy-rg-20260127-2100"
+  default = "dokploy-rg-20260203-1900"
 }
 
 variable "naming_suffix" {
   type    = string
-  default = "20260127-2100"
+  default = "20260203-1900"
 }
 
 variable "location" {

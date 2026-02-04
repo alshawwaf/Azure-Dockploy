@@ -204,15 +204,23 @@ resource "azurerm_linux_virtual_machine" "vm" {
     # 4. Create directories on persistent disk
     mkdir -p $MOUNT_POINT/etc-dokploy
     mkdir -p $MOUNT_POINT/var-lib-docker
+    mkdir -p $MOUNT_POINT/var-lib-containerd
+    mkdir -p $MOUNT_POINT/root-docker
 
     # 5. Backup/clean existing dirs and symlink
     if [ ! -L /etc/dokploy ]; then
       systemctl stop docker || true
+      systemctl stop containerd || true
+
       [ -d /etc/dokploy ] && mv /etc/dokploy /etc/dokploy.bak
       [ -d /var/lib/docker ] && mv /var/lib/docker /var/lib/docker.bak
+      [ -d /var/lib/containerd ] && mv /var/lib/containerd /var/lib/containerd.bak
+      [ -d /root/.docker ] && mv /root/.docker /root/.docker.bak
       
       ln -s $MOUNT_POINT/etc-dokploy /etc/dokploy
       ln -s $MOUNT_POINT/var-lib-docker /var/lib/docker
+      ln -s $MOUNT_POINT/var-lib-containerd /var/lib/containerd
+      ln -s $MOUNT_POINT/root-docker /root/.docker
     fi
 
     # 6. Install Docker
@@ -226,6 +234,11 @@ resource "azurerm_linux_virtual_machine" "vm" {
     if ! [ -f /etc/dokploy/dokploy.sh ]; then
       curl -sSL https://dokploy.com/install.sh | sudo sh
     fi
+
+    # 8. Install Python3 and requests for automation script
+    apt-get update
+    apt-get install -y python3 python3-pip
+    pip3 install requests
   EOF
   )
 }
@@ -235,11 +248,26 @@ resource "null_resource" "dokploy_setup" {
   depends_on = [azurerm_linux_virtual_machine.vm, azurerm_virtual_machine_data_disk_attachment.data_attach]
 
   triggers = {
-    vm_id = azurerm_linux_virtual_machine.vm.id
+    vm_id            = azurerm_linux_virtual_machine.vm.id
+    automation_script = filesha256("automation/dokploy_automate.py")
+    automation_config = filesha256("automation/dokploy_config.json")
+    env_agentic       = filesha256("automation/.env_agentic")
+    env_dev_hub       = filesha256("automation/.env_dev-hub")
+    env_lakera        = filesha256("automation/.env_lakera-demo")
+    env_training      = filesha256("automation/.env_training-portal")
   }
 
   provisioner "local-exec" {
-    command = "python automation/dokploy_automate.py --url http://${azurerm_public_ip.pip.ip_address}:3000 --email ${var.dokploy_admin_email} --password ${var.dokploy_admin_password} --config automation/dokploy_config.json"
+    command = <<-EOT
+      echo "Waiting 90s for VM cloud-init and Dokploy startup..."
+      powershell -Command "Start-Sleep -Seconds 90"
+      echo "Copying automation files to VM..."
+      scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa automation/dokploy_automate.py automation/dokploy_config.json ${var.admin_username}@${azurerm_public_ip.pip.ip_address}:/tmp/
+      echo "Copying env files to VM..."
+      scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa automation/.env_agentic automation/.env_lakera-demo automation/.env_training-portal automation/.env_dev-hub ${var.admin_username}@${azurerm_public_ip.pip.ip_address}:/tmp/
+      echo "Running automation script on VM..."
+      ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${var.admin_username}@${azurerm_public_ip.pip.ip_address} "cd /tmp && python3 dokploy_automate.py --url http://localhost:3000 --email ${var.dokploy_admin_email} --password ${var.dokploy_admin_password} --config dokploy_config.json --ip ${azurerm_public_ip.pip.ip_address}"
+    EOT
   }
 }
 

@@ -555,7 +555,6 @@ def update_compose_env(url, cookies, compose_id, env_content):
 
 
 def detect_env_file(app_name):
-    """Look for .env files matching the app name slug or keywords."""
     # 1. Try exact slugs
     slugs = [
         app_name.lower().replace(" ", "-"),
@@ -564,7 +563,7 @@ def detect_env_file(app_name):
         app_name.lower(),
     ]
 
-    search_dirs = [".", "automation"]
+    search_dirs = [".", "automation", os.path.join("automation", "envs")]
 
     for directory in search_dirs:
         for slug in slugs:
