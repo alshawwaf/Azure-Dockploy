@@ -456,16 +456,15 @@ def update_compose_git(
     trpc_url = f"{url}/api/trpc/compose.update?batch=1"
 
     json_payload = {
-        "customGitBranch": branch,
-        "customGitUrl": github_url,
-        "customGitSSHKeyId": ssh_key_id,
         "composeId": compose_id,
+        "customGitUrl": github_url,
+        "customGitBranch": branch,
         "sourceType": "git",
         "composePath": "./docker-compose.yml",
         "composeStatus": "idle",
         "watchPaths": [],
         "enableSubmodules": False,
-        "randomize": True,  # Ensure no port conflicts
+        "randomize": True,
     }
 
     if compose_command:
@@ -475,6 +474,9 @@ def update_compose_git(
     if env_vars:
         json_payload["env"] = env_vars
         json_payload["envVars"] = env_vars
+    
+    if ssh_key_id:
+        json_payload["customGitSSHKeyId"] = ssh_key_id
 
     meta_payload = {"values": {}}
     if ssh_key_id is None:
@@ -486,7 +488,7 @@ def update_compose_git(
             "meta": meta_payload,
         }
     }
-    print(f"Connecting GitHub (sourceType: git): {github_url}...")
+    print(f"Connecting GitHub (sourceType: git): {github_url} (branch: {branch})...")
     try:
         request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
     except Exception as e:
@@ -543,11 +545,16 @@ def update_compose_file(url, cookies, compose_id, compose_content, source_type=N
 def update_compose_env(url, cookies, compose_id, env_content):
     """Update environment variables for a Compose application."""
     trpc_url = f"{url}/api/trpc/compose.update?batch=1"
-
-    # In Dokploy, env vars are often sent as a single string field 'envVars'
-    # in the compose update payload.
-    payload = {"0": {"json": {"composeId": compose_id, "envVars": env_content}}}
-    print(f"Injecting environment variables for compose {compose_id}...")
+    payload = {
+        "0": {
+            "json": {
+                "composeId": compose_id,
+                "envVars": env_content,
+                "env": env_content
+            }
+        }
+    }
+    print(f"Updating environment variables for {compose_id}...")
     try:
         request_with_retry("POST", trpc_url, json=payload, cookies=cookies, timeout=30)
     except Exception as e:
@@ -790,6 +797,14 @@ if __name__ == "__main__":
                 subprocess.run(["sudo", "chown", "root:root", target_path], check=True)
                 subprocess.run(["sudo", "chmod", "644", target_path], check=True)
             else:
+                # Ensure remote directory exists
+                remote_dir = os.path.dirname(target_path)
+                ssh_mkdir = [
+                    "ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
+                    f"adminuser@{remote_ip}", f"sudo mkdir -p {remote_dir} && sudo chown adminuser:adminuser {remote_dir}"
+                ]
+                subprocess.run(ssh_mkdir, check=True)
+
                 scp_cmd = [
                     "scp", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
                     local_path, f"adminuser@{remote_ip}:{target_path}"
@@ -1013,28 +1028,27 @@ if __name__ == "__main__":
                             env_content = f.read()
                     except Exception as e:
                         print(f"Warning: Could not read env file {env_file}: {e}")
-                else:
-                    print(f"No environment file found for {cfg['name']}.")
-
                 # Get branch if specified
                 branch = cfg.get("branch", "main")
                 
                 # Get compose command if specified (e.g., "--profile cpu")
                 compose_command = cfg.get("composeCommand", None)
-                
+
+                # Update Git and Environment variables in one go via API
                 update_compose_git(
-                    url, cookies, cid, repo_url, env_content, ssh_key_to_use,
+                    url,
+                    cookies,
+                    cid,
+                    repo_url,
+                    env_vars=env_content,
+                    ssh_key_id=ssh_key_to_use,
                     branch=branch,
                     compose_command=compose_command
                 )
                 
-                # Double-check env vars are injected via API
+                # belts and suspenders: manually inject via API env call too
                 if env_content:
                     update_compose_env(url, cookies, cid, env_content)
-
-                # Keep sourceType as "git" - let Dokploy pull the docker-compose.yml from GitHub
-                # This is consistent with how other apps in this project are deployed
-                print(f"Using GitHub-linked docker-compose.yml for {cfg['name']}...")
 
                 if "exposures" in cfg:
                     print(f"Setting up multiple domains for {cfg['name']}...")
@@ -1052,6 +1066,20 @@ if __name__ == "__main__":
                         url, cookies, cid, cfg["domain"], cfg["port"], cfg["service"]
                     )
 
+                # ROBUSTNESS: Ensure .env file is physically present on the server for Docker Compose
+                # We do this BEFORE deployment if possible, but directories are created after first "Connect"
+                if env_file:
+                    full_app_name = get_compose_app_name(url, cookies, cid)
+                    if full_app_name:
+                        print(f"Ensuring .env file for {full_app_name} on server {ip_address}...")
+                        import time
+                        time.sleep(2)  # Wait for Dokploy to create directories
+                        copy_env_file_to_remote(env_file, ip_address, full_app_name)
+
+                # TRIGGER DEPLOYMENT (ONCE)
+                print(f"Triggering final deployment for {cfg['name']}...")
+                deploy_compose(url, cookies, cid)
+
                 if "Dev-Hub" in cfg["name"]:
                     full_app_name = get_compose_app_name(url, cookies, cid)
                     if full_app_name:
@@ -1064,16 +1092,5 @@ if __name__ == "__main__":
                                 compose_content = f.read()
                             print(f"Switching {cfg['name']} to sourceType: compose (Local)")
                             update_compose_file(url, cookies, cid, compose_content, source_type="compose")
-
-                deploy_compose(url, cookies, cid)
-
-                # Ensure .env file is present on the server (robustness)
-                if env_file:
-                    full_app_name = get_compose_app_name(url, cookies, cid)
-                    if full_app_name:
-                        print(f"Ensuring .env file for {full_app_name}...")
-                        import time
-                        time.sleep(5)  # Give Dokploy a moment to create the directory
-                        copy_env_file_to_remote(env_file, ip_address, full_app_name)
 
         print("\n" + "=" * 60 + "\nDOKPLOY COMPOSE AUTOMATION COMPLETE!\n" + "=" * 60)

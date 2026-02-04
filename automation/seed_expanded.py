@@ -101,15 +101,6 @@ def seed():
                 is_live=True
             ),
             models.Application(
-                name="Qdrant Vector DB",
-                description="Vector database for high-performance semantic search.",
-                url="https://qdrant.alshawwaf.ca",
-                github_url="https://github.com/alshawwaf/cp-agentic-mcp-playground",
-                category="Database",
-                icon="📊",
-                is_live=True
-            ),
-            models.Application(
                 name="Docs-to-Swagger",
                 description="Automated conversion of documentation to OpenAPI/Swagger specifications.",
                 url="https://swagger.alshawwaf.ca",

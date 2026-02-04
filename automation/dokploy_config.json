@@ -22,8 +22,7 @@
             {"domain": "n8n.alshawwaf.ca", "service": "n8n", "port": 5678},
             {"domain": "chat.alshawwaf.ca", "service": "open-webui", "port": 8080},
             {"domain": "flowise.alshawwaf.ca", "service": "flowise", "port": 3020},
-            {"domain": "langflow.alshawwaf.ca", "service": "langflow", "port": 7860},
-            {"domain": "qdrant.alshawwaf.ca", "service": "qdrant", "port": 6333}
+            {"domain": "langflow.alshawwaf.ca", "service": "langflow", "port": 7860}
         ]
     },
     {
