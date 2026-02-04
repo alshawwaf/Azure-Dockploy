@@ -32,5 +32,14 @@
         "domain": "hub.alshawwaf.ca",
         "service": "dev-hub-frontend",
         "port": 80
+    },
+    {
+        "name": "Docs-to-Swagger",
+        "repo": "https://github.com/alshawwaf/cp-docs-to-swagger.git",
+        "branch": "master",
+        "domain": "swagger.alshawwaf.ca",
+        "service": "app",
+        "port": 9482,
+        "hostPort": 9482
     }
 ]

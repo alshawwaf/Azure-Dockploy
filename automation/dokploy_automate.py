@@ -602,6 +602,79 @@ def deploy_compose(url, cookies, compose_id):
         print(f"Error deploying compose: {e}")
 
 
+def manual_git_clone_and_inject(ip_address, full_app_name, repo_url, ssh_private_path):
+    """Manually clone the repo and inject customizations via SSH."""
+    print(f"Manually cloning {repo_url} for {full_app_name}...")
+    code_dir = f"/etc/dokploy/compose/{full_app_name}/code"
+    
+    commands = [
+        f"sudo rm -rf {code_dir}",
+        f"sudo mkdir -p {code_dir}",
+        f"sudo git clone {repo_url} {code_dir}",
+        f"sudo chown -R adminuser:adminuser {code_dir}"
+    ]
+    
+    try:
+        for cmd in commands:
+            ssh_cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path, f"adminuser@{ip_address}", cmd]
+            subprocess.run(ssh_cmd, check=True)
+            
+        # Now inject
+        inject_dev_hub_customizations(ip_address, full_app_name, ssh_private_path, wait=False)
+        return True
+    except Exception as e:
+        print(f"Error during manual clone and inject: {e}")
+        return False
+
+
+def inject_dev_hub_customizations(ip_address, full_app_name, ssh_private_path, wait=True):
+    """Inject custom UI files into the Dev-Hub deployment."""
+    print(f"Injecting Dev-Hub UI customizations for {full_app_name}...")
+    
+    directory = f"/etc/dokploy/compose/{full_app_name}/code/frontend/src/pages"
+    
+    if wait:
+        print(f"Waiting for target directory to be created: {directory}")
+        max_retries = 12
+        for i in range(max_retries):
+            check_cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path, f"adminuser@{ip_address}", f"test -d {directory} && echo 'exists'"]
+            try:
+                result = subprocess.run(check_cmd, capture_output=True, text=True)
+                if "exists" in result.stdout:
+                    print("Directory found!")
+                    break
+            except:
+                pass
+            print(f"Waiting... ({i+1}/{max_retries})")
+            time.sleep(5)
+        else:
+            print("Timeout waiting for directory creation. Skipping injection.")
+            return
+
+    local_files = {
+        "automation/LandingPage_new.tsx": f"/etc/dokploy/compose/{full_app_name}/code/frontend/src/pages/LandingPage.tsx",
+        "automation/AppCard_new.tsx": f"/etc/dokploy/compose/{full_app_name}/code/frontend/src/components/AppCard.tsx",
+        "automation/index_update.css": f"/tmp/index_update.css"
+    }
+    
+    try:
+        for local, remote in local_files.items():
+            if os.path.exists(local):
+                print(f"Uploading {local} to {remote}...")
+                scp_cmd = ["scp", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path, local, f"adminuser@{ip_address}:{remote}"]
+                subprocess.run(scp_cmd, check=True)
+        
+        # Append CSS
+        append_css_cmd = [
+            "ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path, f"adminuser@{ip_address}",
+            f"sudo bash -c 'cat /tmp/index_update.css >> /etc/dokploy/compose/{full_app_name}/code/frontend/src/index.css'"
+        ]
+        subprocess.run(append_css_cmd, check=True)
+        print("UI customizations injected successfully.")
+    except Exception as e:
+        print(f"Warning: Failed to inject UI customizations: {e}")
+
+
 def wait_for_server_ready(url, cookies, server_id, timeout=300):
     """Wait for server status to become active."""
     print(f"Waiting for server {server_id} to be active...")
@@ -944,11 +1017,15 @@ if __name__ == "__main__":
                 else:
                     print(f"No environment file found for {cfg['name']}.")
 
+                # Get branch if specified
+                branch = cfg.get("branch", "main")
+                
                 # Get compose command if specified (e.g., "--profile cpu")
                 compose_command = cfg.get("composeCommand", None)
                 
                 update_compose_git(
                     url, cookies, cid, repo_url, env_content, ssh_key_to_use,
+                    branch=branch,
                     compose_command=compose_command
                 )
                 
@@ -975,6 +1052,19 @@ if __name__ == "__main__":
                     create_domain(
                         url, cookies, cid, cfg["domain"], cfg["port"], cfg["service"]
                     )
+
+                if "Dev-Hub" in cfg["name"]:
+                    full_app_name = get_compose_app_name(url, cookies, cid)
+                    if full_app_name:
+                        manual_git_clone_and_inject(ip_address, full_app_name, repo_url, ssh_private_path)
+                        
+                        # Read the local compose file
+                        local_compose_path = "automation/dev_hub_compose.yml"
+                        if os.path.exists(local_compose_path):
+                            with open(local_compose_path, "r") as f:
+                                compose_content = f.read()
+                            print(f"Switching {cfg['name']} to sourceType: compose (Local)")
+                            update_compose_file(url, cookies, cid, compose_content, source_type="compose")
 
                 deploy_compose(url, cookies, cid)
 
