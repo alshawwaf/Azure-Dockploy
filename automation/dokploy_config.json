@@ -19,7 +19,7 @@
         "repo": "https://github.com/alshawwaf/cp-agentic-mcp-playground.git",
         "service": "n8n",
         "exposures": [
-            {"domain": "n8n.{{DOMAIN}}", "service": "n8n", "port": 5678},
+            {"domain": "workflow.{{DOMAIN}}", "service": "n8n", "port": 5678},
             {"domain": "chat.{{DOMAIN}}", "service": "open-webui", "port": 8080},
             {"domain": "flowise.{{DOMAIN}}", "service": "flowise", "port": 3020},
             {"domain": "langflow.{{DOMAIN}}", "service": "langflow", "port": 7860}
@@ -41,4 +41,5 @@
         "port": 9482,
         "hostPort": 9482
     }
+]
 ]

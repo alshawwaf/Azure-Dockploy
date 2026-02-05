@@ -272,7 +272,7 @@ resource "null_resource" "dokploy_setup" {
   provisioner "local-exec" {
     command = <<-EOT
       echo "Waiting 90s for VM cloud-init and Dokploy startup..."
-      powershell -Command "Start-Sleep -Seconds 90"
+      sleep 90
       echo "Copying automation files to VM..."
       scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa automation/dokploy_automate.py automation/dokploy_config.json ${var.admin_username}@${azurerm_public_ip.pip.ip_address}:/tmp/
       # echo "Copying env files to VM..."
