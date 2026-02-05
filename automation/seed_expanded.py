@@ -70,7 +70,7 @@ def seed():
             models.Application(
                 name="n8n Automation",
                 description="Workflow automation tool for linking LLMs and services.",
-                url="https://n8n.{DOMAIN}",
+                url="https://workflow.{DOMAIN}",
                 github_url="https://github.com/alshawwaf/cp-agentic-mcp-playground",
                 category="Automation",
                 icon="/logos/n8n.png",
