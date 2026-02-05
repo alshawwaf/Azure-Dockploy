@@ -14,6 +14,74 @@ except ImportError:
 
 print("DEBUG: Script started...")
 
+ROOT_DOMAIN = "cpdemo.ca"
+
+def replace_domain(content):
+    if content is None: return None
+    if isinstance(content, str):
+        return content.replace("{{DOMAIN}}", ROOT_DOMAIN)
+    if isinstance(content, list):
+        return [replace_domain(i) for i in content]
+    if isinstance(content, dict):
+        return {k: replace_domain(v) for k, v in content.items()}
+    return content
+
+def find_env_file(app_name):
+    slugs = [
+        app_name.lower().replace(" ", "-"),
+        app_name.lower().replace(" ", "_"),
+        app_name.lower(),
+        "agentic" if "agentic" in app_name.lower() else None,
+        "dev-hub" if "dev hub" in app_name.lower() else None,
+    ]
+    slugs = [s for s in slugs if s]
+    search_dirs = [".", "automation", "automation/envs", "envs"]
+    for directory in search_dirs:
+        for slug in slugs:
+            path = os.path.join(directory, f".env_{slug}")
+            if os.path.exists(path):
+                return path
+    return None
+
+def copy_env_file_to_remote(local_path, remote_ip, app_slug):
+    try:
+        target_path = f"/etc/dokploy/compose/{app_slug}/code/.env"
+        print(f"Ensuring {target_path} on {remote_ip}...")
+        
+        # Check if we're running locally on the target VM
+        is_local = False
+        try:
+            import socket
+            if os.path.exists(f"/etc/dokploy/compose/{app_slug}"):
+                is_local = True
+        except:
+            pass
+
+        if is_local:
+            print(f"Detected local execution. Copying {local_path} to {target_path}...")
+            subprocess.run(["sudo", "mkdir", "-p", os.path.dirname(target_path)], check=True)
+            subprocess.run(["sudo", "cp", local_path, target_path], check=True)
+            subprocess.run(["sudo", "chmod", "644", target_path], check=True)
+        else:
+            # SSH copy
+            print(f"Using SCP to copy {local_path} to {target_path} on {remote_ip}...")
+            # We assume the user has sudo rights without password or we use a temporary directory
+            subprocess.run([
+                "ssh", "-o", "StrictHostKeyChecking=no", "-i", os.path.expanduser("~/.ssh/id_rsa"),
+                f"adminuser@{remote_ip}", f"sudo mkdir -p {os.path.dirname(target_path)}"
+            ], check=True)
+            
+            # Copy to temp first then move with sudo
+            temp_path = f"/tmp/.env_{app_slug}"
+            subprocess.run(["scp", "-o", "StrictHostKeyChecking=no", "-i", os.path.expanduser("~/.ssh/id_rsa"), local_path, f"adminuser@{remote_ip}:{temp_path}"], check=True)
+            subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no", "-i", os.path.expanduser("~/.ssh/id_rsa"), f"adminuser@{remote_ip}", f"sudo mv {temp_path} {target_path}"], check=True)
+            subprocess.run(["ssh", "-o", "StrictHostKeyChecking=no", "-i", os.path.expanduser("~/.ssh/id_rsa"), f"adminuser@{remote_ip}", f"sudo chmod 644 {target_path}"], check=True)
+            
+        return True
+    except Exception as e:
+        print(f"Error copying env file: {e}")
+        return False
+
 
 def request_with_retry(
     method, url, max_retries=3, backoff_factor=2, timeout=30, **kwargs
@@ -139,7 +207,7 @@ def setup_ssh_and_server(
         ssh_cmd = [
             "ssh",
             "-i",
-            "~/.ssh/id_rsa",
+            args.ssh_private,
             "-o",
             "StrictHostKeyChecking=no",
             f"{username}@{ip_address}",
@@ -318,17 +386,50 @@ def delete_project(url, cookies, project_id):
     print(f"Deleting project {project_id}...")
     trpc_url_del = f"{url}/api/trpc/project.delete?batch=1"
     payload = {"0": {"json": {"projectId": project_id}}}
-    try:
-        resp = requests.post(trpc_url_del, json=payload, cookies=cookies, timeout=30)
-        if resp.status_code == 200:
-            print("Project deleted.")
-            return True
-        else:
-            print(f"Failed to delete project: {resp.status_code}")
+    
+    # Retry logic for project deletion
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(trpc_url_del, json=payload, cookies=cookies, timeout=60)
+            print(f"DEBUG: Delete project response status: {resp.status_code}")
+            
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    # Check for errors in TRPC response
+                    if data and isinstance(data, list) and len(data) > 0:
+                        result = data[0].get("result", {})
+                        if "error" in result or "error" in data[0]:
+                            error_msg = result.get("error") or data[0].get("error")
+                            print(f"DEBUG: TRPC error in response: {error_msg}")
+                            if attempt < max_retries - 1:
+                                print(f"Retrying delete... (attempt {attempt + 2}/{max_retries})")
+                                time.sleep(2)
+                                continue
+                            return False
+                    print(f"Project {project_id} deleted successfully.")
+                    return True
+                except Exception as parse_err:
+                    print(f"DEBUG: Could not parse response: {parse_err}")
+                    # If we can't parse but got 200, assume success
+                    print(f"Project {project_id} deleted (assumed success).")
+                    return True
+            else:
+                print(f"Failed to delete project: {resp.status_code} - {resp.text[:200]}")
+                if attempt < max_retries - 1:
+                    print(f"Retrying delete... (attempt {attempt + 2}/{max_retries})")
+                    time.sleep(2)
+                    continue
+                return False
+        except Exception as e:
+            print(f"Error deleting project: {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying delete... (attempt {attempt + 2}/{max_retries})")
+                time.sleep(2)
+                continue
             return False
-    except Exception as e:
-        print(f"Error deleting project: {e}")
-        return False
+    return False
 
 
 def force_cleanup_ports(ip_address, username, key_path, ports):
@@ -570,7 +671,15 @@ def detect_env_file(app_name):
         app_name.lower(),
     ]
 
-    search_dirs = [".", "automation", os.path.join("automation", "envs")]
+    # Get the directory where this script is located
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    search_dirs = [
+        ".",
+        "envs",
+        os.path.join(script_dir, "envs"),
+        "automation",
+        os.path.join("automation", "envs"),
+    ]
 
     for directory in search_dirs:
         for slug in slugs:
@@ -669,7 +778,6 @@ def inject_dev_hub_customizations(ip_address, full_app_name, ssh_private_path, w
                 print(f"Uploading {local} to {remote}...")
                 scp_cmd = ["scp", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path, local, f"adminuser@{ip_address}:{remote}"]
                 subprocess.run(scp_cmd, check=True)
-        
         # Append CSS
         append_css_cmd = [
             "ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path, f"adminuser@{ip_address}",
@@ -700,24 +808,111 @@ def wait_for_server_ready(url, cookies, server_id, timeout=300):
     return False
 
 
-def sanitize_compose_file(content, app_name):
-    """Remove problematic lines like bind mounts that hide image code."""
-    # Common fixes for all apps:
-    # 1. Replace ~ with a relative path to avoid "invalid proto" errors in some Docker versions
+def sanitize_compose_file(content, app_name, app_path=None):
+    """Refined sanitization for Dokploy compatibility."""
+    import re
+    
+    # 0. Expand Tildes and standardize relative paths BEFORE volume regex
     content = content.replace("~/.flowise", "./flowise_data")
     content = content.replace("~/.n8n", "./n8n_data")
     content = content.replace("~/.docker", "./docker_config")
+    content = content.replace("~/", "./")
+
+    # 1. Inject env_file: [".env"] into every service
+    lines = content.splitlines()
+    new_lines = []
+    in_services = False
     
+    for line in lines:
+        stripped = line.strip()
+        if stripped == "services:":
+            in_services = True
+            new_lines.append(line)
+            continue
+        
+        if in_services and line.startswith("  ") and not line.startswith("    ") and stripped.endswith(":"):
+            new_lines.append(line)
+            # Add env_file right after service definition
+            indent = "    "
+            new_lines.append(f"{indent}env_file:")
+            new_lines.append(f"{indent}  - .env")
+            continue
+        
+        new_lines.append(line)
+    
+    content = "\n".join(new_lines)
+
+    # 2. Fix OLLAMA_HOST warnings (escaped $$ for Dokploy inner parser)
+    content = content.replace("@ $OLLAMA_HOST", "@ $${OLLAMA_HOST}")
+    content = content.replace("@ $$OLLAMA_HOST", "@ $${OLLAMA_HOST}")
+    content = content.replace('OLLAMA_HOST="$OLLAMA_HOST"', 'OLLAMA_HOST="$${OLLAMA_HOST}"')
+    
+    # 3. Handle Volumes and Build Contexts - Convert to Absolute
+    if app_path:
+        # Standardize relative mounts/contexts to absolute paths using regex
+        # This targets anything starting with ./ after a space, hyphen, or colon
+        content = re.sub(r'((?:^|\s+)-\s+("?))\./', rf'\1{app_path}/', content, flags=re.MULTILINE)
+        content = re.sub(r'(:)\./', f':{app_path}/', content)
+        content = re.sub(r'(context:\s+)\./', f'\\1{app_path}/', content)
+        content = re.sub(r'(env_file:\s+)\./', f'\\1{app_path}/', content)
+
     if "Lakera" in app_name:
-        # Remove common bind mount that blinds the container: .:/app
         lines = content.splitlines()
         new_lines = []
         for line in lines:
-            if ".:/app" in line:
-                print(f"Sanitizing line in {app_name}: {line.strip()}")
-                continue
+            if ".:/app" in line: continue
             new_lines.append(line)
-        return "\n".join(new_lines)
+        content = "\n".join(new_lines)
+
+    return content
+
+def hard_inject_env_vars(content, env_file_path):
+    """Replace ${VAR} and ${VAR:-default} with actual values or defaults."""
+    import re
+    if not env_file_path or not os.path.exists(env_file_path):
+        return content
+    
+    env_vars = {}
+    try:
+        with open(env_file_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    env_vars[k.strip()] = v.strip()
+    except Exception as e:
+        print(f"Warning: Could not read env file for hard injection: {e}")
+        return content
+
+    # 1. First pass: Handle ${VAR:-default}
+    def resolve_default(match):
+        var_name = match.group(1)
+        default_val = match.group(2)
+        return env_vars.get(var_name, default_val)
+    
+    content = re.sub(r'\$\{([^}:-]+):-([^}]*)\}', resolve_default, content)
+
+    # 2. Second pass: Handle direct matches ${VAR} or $VAR
+    # Sort keys by length DESC to avoid partial matching issues
+    for k in sorted(env_vars.keys(), key=len, reverse=True):
+        v = env_vars[k]
+        content = content.replace(f"${{{k}}}", v)
+        content = content.replace(f"${k}", v)
+        # Handle escaped ones from Dokploy if already present
+        content = content.replace(f"$${{{k}}}", v)
+        content = content.replace(f"$$${k}", v)
+    
+    # 3. Third pass: Clean up ANY remaining ${VAR} or $VAR that weren't in env_vars
+    # This is critical to prevent "invalid proto" (e.g. :5678)
+    # However, we must NOT break Traefik labels that use $ in rules if any (rare in this setup)
+    # To be safe, we only resolve variables in ports/volumes/contexts
+    def cleanup_unresolved(match):
+        print(f"DEBUG: Resolving empty variable {match.group(0)}")
+        return ""
+        
+    # Standard variables
+    content = re.sub(r'\$\{[^}]+\}', cleanup_unresolved, content)
+    
     return content
 
 if __name__ == "__main__":
@@ -727,6 +922,7 @@ if __name__ == "__main__":
     parser.add_argument("--url", required=True, help="Dokploy URL")
     parser.add_argument("--email", required=True, help="Admin email")
     parser.add_argument("--password", required=True, help="Admin password")
+    parser.add_argument("--domain", default="cpdemo.ca", help="Root domain for apps (default: cpdemo.ca)")
     parser.add_argument("--ip", help="VM Public IP (default: derived from URL)")
     parser.add_argument(
         "--config", default="dokploy_config.json", help="Path to apps config JSON"
@@ -756,6 +952,20 @@ if __name__ == "__main__":
     args = parser.parse_args()
     url = args.url.rstrip("/")
     ip_address = args.ip or url.split("//")[-1].split(":")[0]
+    root_domain = args.domain
+
+    # Update environment with domain
+    os.environ["DOMAIN"] = root_domain
+
+    def replace_domain(content):
+        if content is None: return None
+        if isinstance(content, str):
+            return content.replace("{{DOMAIN}}", root_domain)
+        if isinstance(content, list):
+            return [replace_domain(i) for i in content]
+        if isinstance(content, dict):
+            return {k: replace_domain(v) for k, v in content.items()}
+        return content
 
     # Helper to find local env files
     def find_env_file(app_name):
@@ -763,8 +973,11 @@ if __name__ == "__main__":
             app_name.lower().replace(" ", "-"),
             app_name.lower().replace(" ", "_"),
             app_name.lower(),
+            "agentic" if "agentic" in app_name.lower() else None,
+            "dev-hub" if "dev hub" in app_name.lower() else None,
         ]
-        search_dirs = [".", "automation"]
+        slugs = [s for s in slugs if s]
+        search_dirs = [".", "automation", "automation/envs", "envs"]
         for directory in search_dirs:
             for slug in slugs:
                 path = os.path.join(directory, f".env_{slug}")
@@ -860,6 +1073,27 @@ if __name__ == "__main__":
 
         server_id = None
         needs_setup = False
+        
+        # In clean mode, delete existing servers and start fresh to ensure SSH keys are valid
+        if args.clean and servers:
+            print("Clean mode: Deleting existing servers to reset SSH keys...")
+            for srv in servers:
+                sid = srv.get("serverId")
+                if sid:
+                    print(f"  Deleting server: {srv.get('name', sid)}...")
+                    try:
+                        trpc_url_srv_del = f"{url}/api/trpc/server.remove?batch=1"
+                        del_payload = {"0": {"json": {"serverId": sid}}}
+                        resp = requests.post(trpc_url_srv_del, json=del_payload, cookies=cookies, timeout=30)
+                        if resp.status_code == 200:
+                            print(f"    Server {sid} deleted.")
+                        else:
+                            print(f"    Warning: Server deletion returned {resp.status_code}")
+                    except Exception as e:
+                        print(f"    Warning: Could not delete server {sid}: {e}")
+            servers = []  # Force re-creation
+            time.sleep(2)
+        
         if servers:
             existing_srv = servers[0]
             # Verify if the existing server is actually setup with root (to avoid permission errors)
@@ -937,29 +1171,42 @@ if __name__ == "__main__":
                 for eid in eids:
                     print(f"  Cleaning environment: {eid}")
                     delete_all_services(url, cookies, eid)
+                    time.sleep(1)  # Small delay between environment cleanups
                 
-                delete_project(url, cookies, pid)
+                # Delete the project with verification
+                success = delete_project(url, cookies, pid)
+                if not success:
+                    print(f"WARNING: Project {pname} may not have been deleted. Attempting force cleanup...")
+                    # Try one more time after a delay
+                    time.sleep(3)
+                    delete_project(url, cookies, pid)
+                
+                time.sleep(2)  # Wait between project deletions
 
-            # Aggressive cleanup via SSH (Disabled)
-            # print("Performing NUCLEAR Docker cleanup via SSH...")
-            # Delete ALL containers, prune networks, volumes, and images
-            cleanup_cmd = (
-                "sudo docker stop $(sudo docker ps -aq) 2>/dev/null || true; "
-                "sudo docker rm -f $(sudo docker ps -aq) 2>/dev/null || true; "
-                "sudo docker system prune -af --volumes"
-            )
-            try:
-                ssh_cmd = [
-                    "ssh",
-                    "-o", "StrictHostKeyChecking=no",
-                    "-i", ssh_private_path,
-                    f"adminuser@{ip_address}",
-                    cleanup_cmd
-                ]
-                # subprocess.run(ssh_cmd, check=True)
-                # print("SSH Nuclear cleanup completed.")
-            except Exception as e:
-                print(f"Warning: SSH Cleanup encountered an error: {e}")
+            # Verify all projects are deleted
+            print("Verifying project deletion...")
+            time.sleep(3)
+            remaining = get_all_project_ids(url, cookies)
+            if remaining:
+                print(f"WARNING: {len(remaining)} projects still exist after cleanup: {[p[2] for p in remaining]}")
+                print("Attempting second pass deletion...")
+                for pid, eids, pname in remaining:
+                    print(f"Force deleting: {pname}")
+                    delete_project(url, cookies, pid)
+                    time.sleep(2)
+
+            # Aggressive cleanup via SSH
+            print("Performing NUCLEAR Docker cleanup via SSH for known ports...")
+            ports_to_clean = [
+                3000, 80, 443,      # Dokploy/Traefik
+                5678,               # n8n
+                3020,               # Flowise
+                7860,               # Langflow
+                9000, 6380, 8082,   # Lakera (Web, Redis, Redis-Commander)
+                9090, 8085, 5433,   # Training Portal
+                9482                # Swagger
+            ]
+            force_cleanup_ports(ip_address, "adminuser", ssh_private_path, ports_to_clean)
 
             print("Waiting for Dokploy to stabilize...")
             time.sleep(10)
@@ -993,7 +1240,8 @@ if __name__ == "__main__":
         # Fetch existing apps in the environment
         existing_apps = get_all_compose_ids(url, cookies, env_id)
         
-        for cfg in app_configs:
+        for cfg_raw in app_configs:
+            cfg = replace_domain(cfg_raw)
             if args.app and args.app.lower() not in cfg["name"].lower():
                 print(f"Skipping {cfg['name']} (filter: {args.app})")
                 continue
@@ -1025,7 +1273,7 @@ if __name__ == "__main__":
                     print(f"Found environment file for {cfg['name']}: {env_file}")
                     try:
                         with open(env_file, "r") as f:
-                            env_content = f.read()
+                            env_content = replace_domain(f.read())
                     except Exception as e:
                         print(f"Warning: Could not read env file {env_file}: {e}")
                 # Get branch if specified
@@ -1067,17 +1315,52 @@ if __name__ == "__main__":
                     )
 
                 # ROBUSTNESS: Ensure .env file is physically present on the server for Docker Compose
-                # We do this BEFORE deployment if possible, but directories are created after first "Connect"
-                if env_file:
-                    full_app_name = get_compose_app_name(url, cookies, cid)
-                    if full_app_name:
-                        print(f"Ensuring .env file for {full_app_name} on server {ip_address}...")
-                        import time
-                        time.sleep(2)  # Wait for Dokploy to create directories
-                        copy_env_file_to_remote(env_file, ip_address, full_app_name)
+                full_app_name = get_compose_app_name(url, cookies, cid)
+                if env_file and full_app_name:
+                    print(f"Ensuring .env file for {full_app_name} on server {ip_address}...")
+                    time.sleep(2)  # Wait for Dokploy to create directories
+                    copy_env_file_to_remote(env_file, ip_address, full_app_name)
 
                 # TRIGGER DEPLOYMENT (ONCE)
                 print(f"Triggering final deployment for {cfg['name']}...")
+                
+                # SPECIAL HANDLING: For Agentic Playground, sanitize and push the compose file
+                if "Agentic" in cfg["name"] or "Playground" in cfg["name"]:
+                    try:
+                        app_path = f"/etc/dokploy/compose/{full_app_name}/code"
+                        # Try multiple possible locations for the local compose file
+                        possible_paths = [
+                            os.path.join(os.path.dirname(__file__), "..", "cp-agentic-mcp-playground", "docker-compose.yml"),
+                            os.path.expanduser("~/Desktop/cp-agentic-mcp-playground/docker-compose.yml"),
+                            "C:/Users/admin/Desktop/cp-agentic-mcp-playground/docker-compose.yml",
+                            "/Users/khalid/Desktop/cp-agentic-mcp-playground/docker-compose.yml",
+                        ]
+                        local_compose = None
+                        for p in possible_paths:
+                            if os.path.exists(p):
+                                local_compose = p
+                                print(f"Found local compose file at: {p}")
+                                break
+                        
+                        if not local_compose:
+                            print(f"Warning: Could not find local compose file for {cfg['name']}. Tried: {possible_paths}")
+                        
+                        if local_compose and os.path.exists(local_compose):
+                            with open(local_compose, "r") as f:
+                                orig_content = f.read()
+                                # 1. Replace {{DOMAIN}}
+                                content = replace_domain(orig_content)
+                                # 2. Hard-inject environment variables to avoid ports issues
+                                if env_file:
+                                    content = hard_inject_env_vars(content, env_file)
+                                # 3. Sanitize for Dokploy (Volumes, env_file tags)
+                                compose_content = sanitize_compose_file(content, cfg["name"], app_path=app_path)
+                            
+                            print(f"Pushing sanitized local compose file for {cfg['name']} (Path: {app_path})...")
+                            update_compose_file(url, cookies, cid, compose_content)
+                    except Exception as e:
+                        print(f"Warning: Failed to push sanitized compose file: {e}")
+
                 deploy_compose(url, cookies, cid)
 
                 if "Dev-Hub" in cfg["name"]:

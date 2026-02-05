@@ -32,3 +32,10 @@ Thumbs.db
 terraform.tfstate
 terraform.tfstate.backup
 *.bak
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Temporary Files
+automation/transformed_compose.yml

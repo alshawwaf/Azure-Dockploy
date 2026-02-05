@@ -2,7 +2,7 @@
     {
         "name": "Lakera Demo",
         "repo": "https://github.com/alshawwaf/Lakera-Demo.git",
-        "domain": "lakera.alshawwaf.ca",
+        "domain": "lakera.{{DOMAIN}}",
         "service": "web",
         "port": 9000,
         "hostPort": 9000
@@ -10,7 +10,7 @@
     {
         "name": "Training Portal",
         "repo": "https://github.com/alshawwaf/training-portal.git",
-        "domain": "training.alshawwaf.ca",
+        "domain": "training.{{DOMAIN}}",
         "service": "frontend",
         "port": 9090
     },
@@ -19,16 +19,16 @@
         "repo": "https://github.com/alshawwaf/cp-agentic-mcp-playground.git",
         "service": "n8n",
         "exposures": [
-            {"domain": "n8n.alshawwaf.ca", "service": "n8n", "port": 5678},
-            {"domain": "chat.alshawwaf.ca", "service": "open-webui", "port": 8080},
-            {"domain": "flowise.alshawwaf.ca", "service": "flowise", "port": 3020},
-            {"domain": "langflow.alshawwaf.ca", "service": "langflow", "port": 7860}
+            {"domain": "n8n.{{DOMAIN}}", "service": "n8n", "port": 5678},
+            {"domain": "chat.{{DOMAIN}}", "service": "open-webui", "port": 8080},
+            {"domain": "flowise.{{DOMAIN}}", "service": "flowise", "port": 3020},
+            {"domain": "langflow.{{DOMAIN}}", "service": "langflow", "port": 7860}
         ]
     },
     {
         "name": "Dev Hub",
         "repo": "https://github.com/alshawwaf/dev-hub.git",
-        "domain": "hub.alshawwaf.ca",
+        "domain": "hub.{{DOMAIN}}",
         "service": "dev-hub-frontend",
         "port": 80
     },
@@ -36,7 +36,7 @@
         "name": "Docs-to-Swagger",
         "repo": "https://github.com/alshawwaf/cp-docs-to-swagger.git",
         "branch": "master",
-        "domain": "swagger.alshawwaf.ca",
+        "domain": "swagger.{{DOMAIN}}",
         "service": "app",
         "port": 9482,
         "hostPort": 9482
