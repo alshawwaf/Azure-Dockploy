@@ -194,7 +194,7 @@ resource "azurerm_linux_virtual_machine" "vm" {
     fi
 
     # 3. Mount disk
-    MOUNT_POINT="/mnt/dokploy-data"
+    MOUNT_POINT="/dokploy-data"
     mkdir -p $MOUNT_POINT
     if ! grep -q "$MOUNT_POINT" /etc/fstab; then
       echo "$DISK_ID $MOUNT_POINT ext4 defaults,nofail 0 2" >> /etc/fstab
