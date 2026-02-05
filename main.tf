@@ -251,10 +251,10 @@ resource "null_resource" "dokploy_setup" {
     vm_id            = azurerm_linux_virtual_machine.vm.id
     automation_script = filesha256("automation/dokploy_automate.py")
     automation_config = filesha256("automation/dokploy_config.json")
-    env_agentic       = filesha256("automation/.env_agentic")
-    env_dev_hub       = filesha256("automation/.env_dev-hub")
-    env_lakera        = filesha256("automation/.env_lakera-demo")
-    env_training      = filesha256("automation/.env_training-portal")
+    # env_agentic       = filesha256("automation/.env_agentic")
+    # env_dev_hub       = filesha256("automation/.env_dev-hub")
+    # env_lakera        = filesha256("automation/.env_lakera-demo")
+    # env_training      = filesha256("automation/.env_training-portal")
   }
 
   provisioner "local-exec" {
@@ -263,8 +263,8 @@ resource "null_resource" "dokploy_setup" {
       powershell -Command "Start-Sleep -Seconds 90"
       echo "Copying automation files to VM..."
       scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa automation/dokploy_automate.py automation/dokploy_config.json ${var.admin_username}@${azurerm_public_ip.pip.ip_address}:/tmp/
-      echo "Copying env files to VM..."
-      scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa automation/.env_agentic automation/.env_lakera-demo automation/.env_training-portal automation/.env_dev-hub ${var.admin_username}@${azurerm_public_ip.pip.ip_address}:/tmp/
+      # echo "Copying env files to VM..."
+      # scp -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa automation/.env_agentic automation/.env_lakera-demo automation/.env_training-portal automation/.env_dev-hub ${var.admin_username}@${azurerm_public_ip.pip.ip_address}:/tmp/
       echo "Running automation script on VM..."
       ssh -o StrictHostKeyChecking=no -i ~/.ssh/id_rsa ${var.admin_username}@${azurerm_public_ip.pip.ip_address} "cd /tmp && python3 dokploy_automate.py --url http://localhost:3000 --email ${var.dokploy_admin_email} --password ${var.dokploy_admin_password} --config dokploy_config.json --ip ${azurerm_public_ip.pip.ip_address}"
     EOT
