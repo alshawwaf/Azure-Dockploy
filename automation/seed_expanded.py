@@ -43,7 +43,7 @@ def seed():
                 url="https://hub.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/dev-hub",
                 category="Management",
-                icon="🏠",
+                icon="/logo.png",
                 is_live=True
             ),
             models.Application(
@@ -70,16 +70,7 @@ def seed():
                 url="https://n8n.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/cp-agentic-mcp-playground",
                 category="Automation",
-                icon="🤖",
-                is_live=True
-            ),
-            models.Application(
-                name="AI Chat Playground",
-                description="Open WebUI for interacting with various LLM models.",
-                url="https://chat.alshawwaf.ca",
-                github_url="https://github.com/alshawwaf/cp-agentic-mcp-playground",
-                category="Chat",
-                icon="💬",
+                icon="/logos/n8n.png",
                 is_live=True
             ),
             models.Application(
@@ -88,7 +79,7 @@ def seed():
                 url="https://flowise.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/cp-agentic-mcp-playground",
                 category="Orchestration",
-                icon="🧠",
+                icon="/logos/flowise.png",
                 is_live=True
             ),
             models.Application(
