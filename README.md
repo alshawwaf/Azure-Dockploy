@@ -26,7 +26,7 @@ This project provides a **one-click, hardened automation** to deploy a productio
 | **AI Dev-Hub** | Central management dashboard for all playground applications. | `hub.cpdemo.ca` | [dev-hub](https://github.com/alshawwaf/dev-hub) |
 | **Training Portal** | Enterprise blueprint for virtualized hands-on learning with Guacamole. | `training.cpdemo.ca` | [training-portal](https://github.com/alshawwaf/training-portal) |
 | **Lakera Demo** | Interactive playground for testing LLM guardrails. | `lakera.cpdemo.ca` | [Lakera-Demo](https://github.com/alshawwaf/Lakera-Demo) |
-| **CP Agentic MCP Playground** | Full-stack AI automation with n8n, Ollama, Open WebUI, Flowise & Langflow. | `n8n.cpdemo.ca`, `chat.cpdemo.ca`, `flowise.cpdemo.ca`, `langflow.cpdemo.ca` | [cp-agentic-mcp-playground](https://github.com/alshawwaf/cp-agentic-mcp-playground) |
+| **CP Agentic MCP Playground** | Full-stack AI automation with n8n, Ollama, Open WebUI, Flowise & Langflow. | `workflow.cpdemo.ca`, `chat.cpdemo.ca`, `flowise.cpdemo.ca`, `langflow.cpdemo.ca` | [cp-agentic-mcp-playground](https://github.com/alshawwaf/cp-agentic-mcp-playground) |
 | **Docs-to-Swagger** | Automated conversion of documentation to OpenAPI/Swagger specifications. | `swagger.cpdemo.ca` | [cp-docs-to-swagger](https://github.com/alshawwaf/cp-docs-to-swagger) |
 
 ## 🛠️ Getting Started
