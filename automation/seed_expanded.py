@@ -38,7 +38,7 @@ def seed():
         print("Seeding applications with groupings...")
         apps = [
             models.Application(
-                name="AI Dev-Hub",
+                name="AI Dev Hub",
                 description="Central management dashboard for all playground applications.",
                 url="https://hub.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/dev-hub",
@@ -52,7 +52,7 @@ def seed():
                 url="https://training.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/training-portal",
                 category="Education",
-                icon="🏗️",
+                icon="/logos/training.png",
                 is_live=True
             ),
             models.Application(
@@ -61,7 +61,7 @@ def seed():
                 url="https://lakera.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/Lakera-Demo",
                 category="Security",
-                icon="🛡️",
+                icon="/logos/lakera.png",
                 is_live=True
             ),
             models.Application(
@@ -97,7 +97,7 @@ def seed():
                 url="https://langflow.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/cp-agentic-mcp-playground",
                 category="Orchestration",
-                icon="🌊",
+                icon="/logos/langflow.png",
                 is_live=True
             ),
             models.Application(
@@ -106,7 +106,7 @@ def seed():
                 url="https://swagger.alshawwaf.ca",
                 github_url="https://github.com/alshawwaf/cp-docs-to-swagger",
                 category="Tools",
-                icon="📘",
+                icon="/logos/swagger.png",
                 is_live=True
             ),
         ]

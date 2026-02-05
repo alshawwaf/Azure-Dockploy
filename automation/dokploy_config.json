@@ -1,6 +1,6 @@
 [
     {
-        "name": "Lakera-Demo",
+        "name": "Lakera Demo",
         "repo": "https://github.com/alshawwaf/Lakera-Demo.git",
         "domain": "lakera.alshawwaf.ca",
         "service": "web",
@@ -26,7 +26,7 @@
         ]
     },
     {
-        "name": "Dev-Hub",
+        "name": "Dev Hub",
         "repo": "https://github.com/alshawwaf/dev-hub.git",
         "domain": "hub.alshawwaf.ca",
         "service": "dev-hub-frontend",
