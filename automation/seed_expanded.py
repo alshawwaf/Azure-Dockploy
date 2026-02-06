@@ -12,11 +12,11 @@ def seed():
     db = SessionLocal()
     try:
         # 0. Basic Configuration
-        DOMAIN = os.getenv("DOMAIN", "cpdemo.ca")
+        DOMAIN = os.getenv("DOMAIN", "example.com")
         
         # 1. Seed Superadmin
         admin_email = os.getenv("SUPERADMIN_EMAIL", f"admin@{DOMAIN}")
-        admin_password = os.getenv("SUPERADMIN_PASSWORD", "Cpwins!1@2026")
+        admin_password = os.getenv("SUPERADMIN_PASSWORD", "ChangeThisPassword123!")
         
         user = db.query(models.User).filter(models.User.email == admin_email).first()
         if not user:
