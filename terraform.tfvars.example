@@ -10,10 +10,3 @@ dokploy_admin_password = "YourSecurePassword123!"
 
 # Enable/Disable Dokploy automation after VM creation
 enable_dokploy_setup = true
-
-# Optional: GoDaddy DNS automation (uncomment if using)
-# enable_godaddy_dns = true
-# godaddy_api_key    = "your-godaddy-api-key"
-# godaddy_api_secret = "your-godaddy-api-secret"
-# godaddy_domain     = "example.com"
-# godaddy_subdomain  = "app"

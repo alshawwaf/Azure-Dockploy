@@ -153,23 +153,23 @@ python automation/verify_deployment.py \
   --password "PASSWORD"
 ```
 
-## 🌐 DNS Management (GoDaddy)
+## 🌐 DNS Configuration
 
-Optional: Terraform can manage DNS records automatically.
+After deployment, configure your DNS provider to point your domains to the VM's public IP address.
 
-```hcl
-# Add to terraform.tfvars
-enable_godaddy_dns = true
-godaddy_api_key    = "your-api-key"
-godaddy_api_secret = "your-api-secret"
-godaddy_domain     = "example.com"
-godaddy_subdomain  = "app"
+**Required DNS Records (A Records):**
+```
+hub.example.com      → <PUBLIC_IP>
+training.example.com → <PUBLIC_IP>
+lakera.example.com   → <PUBLIC_IP>
+workflow.example.com → <PUBLIC_IP>
+chat.example.com     → <PUBLIC_IP>
+flowise.example.com  → <PUBLIC_IP>
+langflow.example.com → <PUBLIC_IP>
+swagger.example.com  → <PUBLIC_IP>
 ```
 
-Or run manually:
-```bash
-python automation/godaddy_dns.py --domain example.com --subdomain app --ip <IP> --set
-```
+Traefik will automatically provision SSL certificates via Let's Encrypt once DNS is configured.
 
 ## 🔐 Security Notes
 
@@ -195,7 +195,6 @@ Azure-Dockploy/
 ├── automation/
 │   ├── dokploy_automate.py     # Main deployment script
 │   ├── dokploy_config.json     # Application definitions
-│   ├── godaddy_dns.py          # DNS automation
 │   ├── verify_deployment.py    # Health checks
 │   ├── seed_expanded.py        # Database seeder
 │   └── envs/
