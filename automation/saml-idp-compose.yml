@@ -7,7 +7,7 @@ services:
     container_name: saml-idp-simulator
     restart: unless-stopped
     environment:
-      - ADMIN_USERNAME=admin
+      - ADMIN_USERNAME=admin@cpdemo.ca
       - ADMIN_PASSWORD=Cpwins!1@2026
       - SECRET_KEY=Super-very-secret-key-cpdemo-2026
       - IDP_HOST=0.0.0.0
