@@ -1,8 +1,8 @@
-# Azure-Dockploy 🚀
+# Azure-Dockploy
 
 A **production-ready, one-click automation** to deploy [Dokploy](https://dokploy.com/) on Azure with full application orchestration. This project handles everything from infrastructure provisioning to application deployment, secret injection, SSL certificates, and Traefik routing.
 
-## ✨ Features
+## Features
 
 - **One-Click Deployment**: Infrastructure and applications fully deployed via Terraform + Python automation
 - **Hardened Automation**: Robust retry logic, exponential backoff, and extensive debug logging
@@ -13,7 +13,7 @@ A **production-ready, one-click automation** to deploy [Dokploy](https://dokploy
 - **Dynamic Routing**: Automated Traefik configuration with Let's Encrypt SSL
 - **Multi-Domain Support**: Deploy multiple services with custom subdomains
 
-## 🏗️ Infrastructure
+## Infrastructure
 
 | Component | Specification |
 |-----------|---------------|
@@ -23,7 +23,7 @@ A **production-ready, one-click automation** to deploy [Dokploy](https://dokploy
 | **Storage** | 128GB StandardSSD managed disk |
 | **Ports** | 22, 80, 443, 3000, 5678, 9000+ |
 
-## 📦 Included Services
+## Included Services
 
 | Service | Description | Example Domain |
 |---------|-------------|----------------|
@@ -33,7 +33,7 @@ A **production-ready, one-click automation** to deploy [Dokploy](https://dokploy
 | **Agentic Playground** | n8n, Ollama, Open WebUI, Flowise, Langflow | `workflow.example.com` |
 | **Docs-to-Swagger** | API docs to OpenAPI conversion | `swagger.example.com` |
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -153,7 +153,7 @@ python automation/verify_deployment.py \
   --password "PASSWORD"
 ```
 
-## 🌐 DNS Configuration
+## DNS Configuration
 
 After deployment, configure your DNS provider to point your domains to the VM's public IP address.
 
@@ -171,9 +171,9 @@ swagger.example.com  → <PUBLIC_IP>
 
 Traefik will automatically provision SSL certificates via Let's Encrypt once DNS is configured.
 
-## 🔐 Security Notes
+## Security Notes
 
-⚠️ **Important**: The following files contain sensitive data and are excluded from Git:
+ **Important**: The following files contain sensitive data and are excluded from Git:
 
 - `terraform.tfvars` - Azure credentials
 - `automation/envs/.env_*` - Application secrets
@@ -183,7 +183,7 @@ Traefik will automatically provision SSL certificates via Let's Encrypt once DNS
 
 Use the provided `.example` files as templates.
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 Azure-Dockploy/
@@ -203,7 +203,7 @@ Azure-Dockploy/
 └── README.md
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch
@@ -213,9 +213,3 @@ Azure-Dockploy/
 ## 📄 License
 
 MIT License - See LICENSE file for details.
-
-## 🙏 Credits
-
-Built with [Dokploy](https://dokploy.com/), [Terraform](https://terraform.io/), and [Traefik](https://traefik.io/).
-
-Developed with Antigravity 🛸
