@@ -4,8 +4,6 @@
 *.tfstate.*
 crash.log
 crash.*.log
-*.tfvars
-*.tfvars.json
 override.tf
 override.tf.json
 _override.tf
@@ -13,29 +11,50 @@ _override.tf.json
 .terraformrc
 terraform.rc
 
-# SSH
-*.pub
+# Terraform variables - NEVER commit real credentials
+terraform.tfvars
+*.auto.tfvars
+!terraform.tfvars.example
+
+# SSH Keys
+*.pem
 id_rsa
+id_rsa.pub
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Gemini
+# IDE
+.vscode/
+.idea/
+
+# Gemini / AI Agents
 .gemini/
+.agent/
 
 # Logs
 *.log
 
-# Secrets
-.env*
-terraform.tfstate
-terraform.tfstate.backup
+# Environment & Secrets - NEVER commit real secrets
+automation/envs/.env_*
+!automation/envs/.env_*.example
+.env
+.env.*
+!.env.example
+
+# Terraform state backups
 *.bak
 
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+.pytest_cache/
+venv/
+.venv/
 
 # Temporary Files
 automation/transformed_compose.yml
+*.tmp
+*.temp

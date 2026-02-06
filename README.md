@@ -1,167 +1,222 @@
 # Azure-Dockploy 🚀
 
-This project provides a **one-click, hardened automation** to deploy a production-ready Dokploy environment on Azure. It handles everything from infrastructure provisioning to application deployment, secret injection, and security configuration.
+A **production-ready, one-click automation** to deploy [Dokploy](https://dokploy.com/) on Azure with full application orchestration. This project handles everything from infrastructure provisioning to application deployment, secret injection, SSL certificates, and Traefik routing.
 
 ## ✨ Features
 
-- **One-Click Rebuild**: Infrastructure and applications can be fully destroyed and rebuilt in minutes via Terraform and Python.
-- **Hardened Automation**: `dokploy_automate.py` includes robust retry logic, exponential backoff, and extensive debug logging.
-- **Cross-Platform Support**: Works on macOS, Windows, and Linux with automatic path resolution.
-- **Smart Secret Management**: Automatic detection and injection of `.env` files with keyword-based matching (e.g., `.env_agentic` matches "CP Agentic MCP Playground").
-- **Clean Rebuild Mode**: The `--clean` flag resets SSH keys, removes stale servers, and ensures fresh deployments without container name conflicts.
-- **Persistent Storage**: Configured with persistent Azure managed disks for Dokploy and Docker data.
-- **Dynamic Routing**: Automated Traefik configuration and domain setup supporting multiple subdomains (e.g., `hub`, `lakera`, `training`, `n8n`, `swagger`).
+- **One-Click Deployment**: Infrastructure and applications fully deployed via Terraform + Python automation
+- **Hardened Automation**: Robust retry logic, exponential backoff, and extensive debug logging
+- **Cross-Platform**: Works on macOS, Windows, and Linux
+- **Smart Secret Management**: Automatic `.env` file injection with keyword-based matching
+- **Clean Rebuild Mode**: `--clean` flag resets everything for fresh deployments
+- **Persistent Storage**: Azure managed disks for Docker data persistence
+- **Dynamic Routing**: Automated Traefik configuration with Let's Encrypt SSL
+- **Multi-Domain Support**: Deploy multiple services with custom subdomains
 
 ## 🏗️ Infrastructure
 
-- **Cloud Provider**: Microsoft Azure
-- **Compute**: Ubuntu 22.04 LTS (Standard_B4ms recommended for Agentic workloads)
-- **Networking**: NSG allowed ports: 22 (SSH), 80 (HTTP), 443 (HTTPS), 3000 (Dokploy), 5678 (n8n), 9000+ (App Ports).
-- **Storage**: Persistent StandardSSD_LRS Managed Disk.
+| Component | Specification |
+|-----------|---------------|
+| **Cloud** | Microsoft Azure |
+| **OS** | Ubuntu 22.04 LTS |
+| **VM Size** | Standard_B4ms (4 vCPU, 16GB RAM) |
+| **Storage** | 128GB StandardSSD managed disk |
+| **Ports** | 22, 80, 443, 3000, 5678, 9000+ |
 
-## 🏢 Services
+## 📦 Included Services
 
-| Service | Description | Domain | Repository |
-| :--- | :--- | :--- | :--- |
-| **AI Dev-Hub** | Central management dashboard for all playground applications. | `hub.cpdemo.ca` | [dev-hub](https://github.com/alshawwaf/dev-hub) |
-| **Training Portal** | Enterprise blueprint for virtualized hands-on learning with Guacamole. | `training.cpdemo.ca` | [training-portal](https://github.com/alshawwaf/training-portal) |
-| **Lakera Demo** | Interactive playground for testing LLM guardrails. | `lakera.cpdemo.ca` | [Lakera-Demo](https://github.com/alshawwaf/Lakera-Demo) |
-| **CP Agentic MCP Playground** | Full-stack AI automation with n8n, Ollama, Open WebUI, Flowise & Langflow. | `workflow.cpdemo.ca`, `chat.cpdemo.ca`, `flowise.cpdemo.ca`, `langflow.cpdemo.ca` | [cp-agentic-mcp-playground](https://github.com/alshawwaf/cp-agentic-mcp-playground) |
-| **Docs-to-Swagger** | Automated conversion of documentation to OpenAPI/Swagger specifications. | `swagger.cpdemo.ca` | [cp-docs-to-swagger](https://github.com/alshawwaf/cp-docs-to-swagger) |
+| Service | Description | Example Domain |
+|---------|-------------|----------------|
+| **AI Dev-Hub** | Central management dashboard | `hub.example.com` |
+| **Training Portal** | Hands-on learning platform | `training.example.com` |
+| **Lakera Demo** | LLM guardrails testing | `lakera.example.com` |
+| **Agentic Playground** | n8n, Ollama, Open WebUI, Flowise, Langflow | `workflow.example.com` |
+| **Docs-to-Swagger** | API docs to OpenAPI conversion | `swagger.example.com` |
 
-## 🛠️ Getting Started
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Terraform
-- Python 3.x
-- Azure Service Principal with Contributor access.
+- [Terraform](https://terraform.io/) >= 1.0
+- Python 3.8+
+- Azure CLI (for creating Service Principal)
+- Azure subscription with Contributor access
 
-### 1. Configuration
+### 1. Clone & Configure
 
-1. **Credentials**: Add your Azure details to `terraform.tfvars`.
-2. **Applications**: Configure your GitHub repositories and domains in `automation/dokploy_config.json`. Supports multi-domain deployments!
+```bash
+git clone https://github.com/alshawwaf/Azure-Dockploy.git
+cd Azure-Dockploy
 
-    ```json
-    {
-      "name": "My App",
-      "repo": "https://github.com/...",
-      "service": "app",
-      "exposures": [
-        {"domain": "app.example.com", "port": 3000},
-        {"domain": "api.example.com", "port": 8080}
-      ]
-    }
+# Copy example files
+cp terraform.tfvars.example terraform.tfvars
+cp automation/envs/.env_*.example automation/envs/  # Remove .example suffix
+```
 
-    ```
-3. **Secrets**: Place `.env_<app-name>` files in the `automation/envs/` folder. The script uses keyword matching:
-   - `.env_agentic` → matches "CP Agentic MCP Playground"
-   - `.env_lakera-demo` → matches "Lakera Demo"
-   - `.env_training-portal` → matches "Training Portal"
-   - `.env_dev-hub` → matches "Dev Hub"
-4. **Seeding**: For the Dev-Hub, run `python automation/seed_expanded.py` within the backend container to populate the application list.
+### 2. Create Azure Service Principal
 
-### 2. Deployment (One-Click)
+```bash
+az login
+az ad sp create-for-rbac --name "dokploy-sp" --role Contributor \
+  --scopes /subscriptions/<YOUR_SUBSCRIPTION_ID>
+```
 
-To build the entire environment from scratch:
+Copy the output values to `terraform.tfvars`:
+- `appId` → `client_id`
+- `password` → `client_secret`
+- `tenant` → `tenant_id`
+
+### 3. Configure Variables
+
+Edit `terraform.tfvars` with your Azure credentials:
+
+```hcl
+subscription_id        = "your-subscription-id"
+client_id              = "your-client-id"
+client_secret          = "your-client-secret"
+tenant_id              = "your-tenant-id"
+dokploy_admin_password = "YourSecurePassword123!"
+enable_dokploy_setup   = true
+```
+
+### 4. Configure Applications
+
+Edit `automation/dokploy_config.json` to define your applications:
+
+```json
+{
+  "name": "My App",
+  "repo": "https://github.com/username/repo",
+  "service": "app",
+  "exposures": [
+    {"domain": "app.example.com", "port": 3000}
+  ]
+}
+```
+
+### 5. Add Secrets (Optional)
+
+Place environment files in `automation/envs/`:
+- `.env_agentic` → matches "CP Agentic MCP Playground"
+- `.env_lakera-demo` → matches "Lakera Demo"
+- `.env_training-portal` → matches "Training Portal"
+- `.env_dev-hub` → matches "Dev Hub"
+
+### 6. Deploy
 
 ```bash
 terraform init
 terraform apply -auto-approve
 ```
 
-The `terraform apply` command is integrated with the Python automation script. Once the VM is ready, it will automatically:
+The automation will:
+1. Create Azure VM with managed disk
+2. Install Docker & Dokploy
+3. Deploy all configured applications
+4. Configure Traefik routing & SSL
+5. Inject environment secrets
 
-- Install Docker & Dokploy.
-- Create your Project and Environments.
-- Register your local SSH key.
-- Deploy all applications defined in your config.
+## 🔧 Manual Operations
 
-### 3. Manual Automation & Management
-
-You can trigger the automation independently or perform a "Clean Rebuild" of the applications without destroying the Azure infrastructure:
+### Re-run Automation Only
 
 ```bash
-# Full Application Sync (incremental update)
-python automation/dokploy_automate.py --url http://<PUBLIC_IP>:3000 --email admin@example.com --password "PASSWORD" --ip <PUBLIC_IP>
+# Incremental update
+python automation/dokploy_automate.py \
+  --url http://<PUBLIC_IP>:3000 \
+  --email admin@example.com \
+  --password "PASSWORD" \
+  --ip <PUBLIC_IP>
 
-# Clean Rebuild (deletes all apps, resets SSH keys, fresh deployment)
-python automation/dokploy_automate.py --url http://<PUBLIC_IP>:3000 --email admin@example.com --password "PASSWORD" --ip <PUBLIC_IP> --clean
+# Clean rebuild (deletes all apps, resets SSH keys)
+python automation/dokploy_automate.py \
+  --url http://<PUBLIC_IP>:3000 \
+  --email admin@example.com \
+  --password "PASSWORD" \
+  --ip <PUBLIC_IP> \
+  --clean
 ```
 
-### 4. Troubleshooting
+### Troubleshooting
 
-**Container Name Conflicts**: If you see "container name already in use" errors, SSH to the VM and clean up:
+**Container name conflicts:**
 ```bash
-ssh -i ~/.ssh/id_rsa adminuser@<PUBLIC_IP> "sudo docker stop \$(sudo docker ps -aq); sudo docker rm \$(sudo docker ps -aq)"
+ssh -i ~/.ssh/id_rsa adminuser@<PUBLIC_IP> \
+  "sudo docker stop \$(sudo docker ps -aq); sudo docker rm \$(sudo docker ps -aq)"
 ```
 
-Then re-run the automation script.
+**Check deployment status:**
+```bash
+python automation/verify_deployment.py \
+  --url http://<PUBLIC_IP>:3000 \
+  --email admin@example.com \
+  --password "PASSWORD"
+```
 
 ## 🌐 DNS Management (GoDaddy)
 
-DNS management is now integrated directly into the Terraform lifecycle. When enabled, Terraform will automatically create/update the A record on `apply` and remove it on `destroy`.
-
-### 1. Configuration (terraform.tfvars)
-
-Add your GoDaddy credentials and domain settings to your `terraform.tfvars`:
+Optional: Terraform can manage DNS records automatically.
 
 ```hcl
-enable_godaddy_dns = true  # Toggle DNS automation (default: true)
-godaddy_api_key    = "your_api_key"
-godaddy_api_secret = "your_api_secret"
+# Add to terraform.tfvars
+enable_godaddy_dns = true
+godaddy_api_key    = "your-api-key"
+godaddy_api_secret = "your-api-secret"
 godaddy_domain     = "example.com"
 godaddy_subdomain  = "app"
 ```
 
-### 2. Manual Usage (Optional)
-
-You can still run the script manually if needed:
-
+Or run manually:
 ```bash
 python automation/godaddy_dns.py --domain example.com --subdomain app --ip <IP> --set
 ```
 
-Logs are stored in `automation/godaddy_dns.log`.
+## 🔐 Security Notes
 
-## 🔍 Verification
+⚠️ **Important**: The following files contain sensitive data and are excluded from Git:
 
-Check the status of your deployments:
+- `terraform.tfvars` - Azure credentials
+- `automation/envs/.env_*` - Application secrets
+- `*.tfstate` - Terraform state (contains resource IDs)
 
-```bash
-python automation/verify_deployment.py --url http://<PUBLIC_IP>:3000 --email admin@example.com --password "PASSWORD"
-```
+**Never commit these files to version control!**
 
-## 🔐 Security & Persistence
-
-- **SSH Keys**: The script automatically generates and registers SSH keys in Dokploy for secure server communication. In `--clean` mode, stale keys are purged and fresh ones created.
-- **Disk Persistence**: Docker data is symlinked to a managed disk at `/mnt/dokploy-data`, ensuring your data survives VM reboots or rebuilds.
-- **Inter-Container Networking**: Applications join the `dokploy-network` to enable proper Traefik routing without exposing ports.
-- **Custom Branch Support**: The automation script supports custom default branches (e.g., `master` for `Docs-to-Swagger`) via the `branch` config option.
-- **Secrets Protection**: The `.gitignore` is pre-configured to prevent `.env` files and `terraform.tfvars` from being pushed to version control.
+Use the provided `.example` files as templates.
 
 ## 📁 Project Structure
 
 ```
 Azure-Dockploy/
-├── main.tf                 # Terraform infrastructure definition
-├── variables.tf            # Terraform variable declarations
-├── terraform.tfvars        # Your Azure credentials (gitignored)
-├── outputs.tf              # Terraform outputs (public IP, etc.)
+├── main.tf                     # Terraform infrastructure
+├── variables.tf                # Variable declarations
+├── outputs.tf                  # Terraform outputs
+├── terraform.tfvars.example    # Example credentials (safe to commit)
+├── .gitignore                  # Excludes sensitive files
 ├── automation/
-│   ├── dokploy_automate.py # Main deployment automation script
-│   ├── dokploy_config.json # Application configuration
-│   ├── godaddy_dns.py      # DNS management script
-│   ├── verify_deployment.py # Deployment verification
-│   ├── seed_expanded.py    # Dev-Hub database seeder
-│   └── envs/               # Environment files
-│       ├── .env_agentic
-│       ├── .env_lakera-demo
-│       ├── .env_training-portal
-│       └── .env_dev-hub
+│   ├── dokploy_automate.py     # Main deployment script
+│   ├── dokploy_config.json     # Application definitions
+│   ├── godaddy_dns.py          # DNS automation
+│   ├── verify_deployment.py    # Health checks
+│   ├── seed_expanded.py        # Database seeder
+│   └── envs/
+│       ├── .env_*.example      # Example env files (safe to commit)
+│       └── .env_*              # Real secrets (gitignored)
 └── README.md
 ```
 
-## Credits
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Never commit real credentials
+4. Submit a pull request
+
+## 📄 License
+
+MIT License - See LICENSE file for details.
+
+## 🙏 Credits
+
+Built with [Dokploy](https://dokploy.com/), [Terraform](https://terraform.io/), and [Traefik](https://traefik.io/).
 
 Developed with Antigravity 🛸
