@@ -867,11 +867,17 @@ def sanitize_compose_file(content, app_name, app_path=None):
     return content
 
 def hard_inject_env_vars(content, env_file_path):
-    """Replace ${VAR} and ${VAR:-default} with actual values or defaults."""
+    """Replace ${VAR} and ${VAR:-default} with actual values or defaults.
+
+    Preserves $${VAR} docker-compose escape sequences (runtime variables)
+    and bare $VAR references inside shell command blocks.
+    Only replaces ${VAR} (braced form), which is the docker-compose
+    interpolation syntax for build-time substitution.
+    """
     import re
     if not env_file_path or not os.path.exists(env_file_path):
         return content
-    
+
     env_vars = {}
     try:
         with open(env_file_path, "r") as f:
@@ -884,35 +890,47 @@ def hard_inject_env_vars(content, env_file_path):
         print(f"Warning: Could not read env file for hard injection: {e}")
         return content
 
+    # 0. Protect $${...} and $$VAR escape sequences with placeholders.
+    #    These are docker-compose escapes meant for runtime resolution
+    #    inside containers and must NOT be replaced at build time.
+    _protected = {}
+    _counter = [0]
+
+    def _protect(match):
+        key = f"__DBLDOLLAR_{_counter[0]}__"
+        _protected[key] = match.group(0)
+        _counter[0] += 1
+        return key
+
+    content = re.sub(r'\$\$\{[^}]+\}', _protect, content)
+    content = re.sub(r'\$\$[A-Za-z_][A-Za-z0-9_]*', _protect, content)
+
     # 1. First pass: Handle ${VAR:-default}
     def resolve_default(match):
         var_name = match.group(1)
         default_val = match.group(2)
         return env_vars.get(var_name, default_val)
-    
+
     content = re.sub(r'\$\{([^}:-]+):-([^}]*)\}', resolve_default, content)
 
-    # 2. Second pass: Handle direct matches ${VAR} or $VAR
-    # Sort keys by length DESC to avoid partial matching issues
+    # 2. Second pass: Handle ${VAR} (braced form only)
+    #    We intentionally do NOT replace bare $VAR because those are
+    #    shell variable references inside command: blocks.
     for k in sorted(env_vars.keys(), key=len, reverse=True):
         v = env_vars[k]
         content = content.replace(f"${{{k}}}", v)
-        content = content.replace(f"${k}", v)
-        # Handle escaped ones from Dokploy if already present
-        content = content.replace(f"$${{{k}}}", v)
-        content = content.replace(f"$$${k}", v)
-    
-    # 3. Third pass: Clean up ANY remaining ${VAR} or $VAR that weren't in env_vars
-    # This is critical to prevent "invalid proto" (e.g. :5678)
-    # However, we must NOT break Traefik labels that use $ in rules if any (rare in this setup)
-    # To be safe, we only resolve variables in ports/volumes/contexts
+
+    # 3. Third pass: Clean up remaining unresolved ${VAR} patterns
     def cleanup_unresolved(match):
         print(f"DEBUG: Resolving empty variable {match.group(0)}")
         return ""
-        
-    # Standard variables
+
     content = re.sub(r'\$\{[^}]+\}', cleanup_unresolved, content)
-    
+
+    # 4. Restore protected double-dollar escape sequences
+    for key, original in _protected.items():
+        content = content.replace(key, original)
+
     return content
 
 if __name__ == "__main__":
@@ -948,6 +966,7 @@ if __name__ == "__main__":
         help="Delete existing project before starting (Fresh Rebuild)",
     )
     parser.add_argument("--app", help="Filter: Only process this specific app name")
+    parser.add_argument("--ssh-user", default="adminuser", help="SSH Username (default: adminuser)")
 
     args = parser.parse_args()
     url = args.url.rstrip("/")
@@ -1014,19 +1033,19 @@ if __name__ == "__main__":
                 remote_dir = os.path.dirname(target_path)
                 ssh_mkdir = [
                     "ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
-                    f"adminuser@{remote_ip}", f"sudo mkdir -p {remote_dir} && sudo chown adminuser:adminuser {remote_dir}"
+                    f"{ssh_user}@{remote_ip}", f"sudo mkdir -p {remote_dir} && sudo chown {ssh_user}:{ssh_user} {remote_dir}"
                 ]
                 subprocess.run(ssh_mkdir, check=True)
 
                 scp_cmd = [
                     "scp", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
-                    local_path, f"adminuser@{remote_ip}:{target_path}"
+                    local_path, f"{ssh_user}@{remote_ip}:{target_path}"
                 ]
                 subprocess.run(scp_cmd, check=True)
                 # Fix permissions
                 ssh_cmd = [
                     "ssh", "-o", "StrictHostKeyChecking=no", "-i", ssh_private_path,
-                    f"adminuser@{remote_ip}",
+                    f"{ssh_user}@{remote_ip}",
                     f"sudo chown root:root {target_path} && sudo chmod 644 {target_path}"
                 ]
                 subprocess.run(ssh_cmd, check=True)
@@ -1037,6 +1056,7 @@ if __name__ == "__main__":
 
     ssh_private_path = os.path.expanduser(args.ssh_private)
     ssh_public_path = os.path.expanduser(args.ssh_public)
+    ssh_user = args.ssh_user
 
     if not os.path.exists(ssh_private_path) or not os.path.exists(ssh_public_path):
         print(f"Error: SSH keys not found at {ssh_private_path} or {ssh_public_path}")
@@ -1107,10 +1127,10 @@ if __name__ == "__main__":
                     f"Existing server {existing_srv['name']} is not root or has no key. Forcing new setup..."
                 )
                 needs_setup = True
-                server_id = setup_ssh_and_server(url, cookies, ip_address, org_id)
+                server_id = setup_ssh_and_server(url, cookies, ip_address, org_id, username=ssh_user)
         else:
             needs_setup = True
-            server_id = setup_ssh_and_server(url, cookies, ip_address, org_id)
+            server_id = setup_ssh_and_server(url, cookies, ip_address, org_id, username=ssh_user)
 
         if not server_id:
             print("Critical: No server available or server setup failed.")
@@ -1206,7 +1226,7 @@ if __name__ == "__main__":
                 9090, 8085, 5433,   # Training Portal
                 9482                # Swagger
             ]
-            force_cleanup_ports(ip_address, "adminuser", ssh_private_path, ports_to_clean)
+            force_cleanup_ports(ip_address, ssh_user, ssh_private_path, ports_to_clean)
 
             print("Waiting for Dokploy to stabilize...")
             time.sleep(10)
